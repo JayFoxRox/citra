@@ -97,6 +97,7 @@ struct ConversionConfiguration {
     u16 input_line_width;
     u16 input_lines;
     CoefficientSet coefficients;
+    u8 padding;
     u16 alpha;
 
     /// Input parameters for the Y (luma) plane
