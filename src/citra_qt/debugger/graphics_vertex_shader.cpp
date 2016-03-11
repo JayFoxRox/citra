@@ -355,6 +355,10 @@ GraphicsVertexShaderWidget::GraphicsVertexShaderWidget(std::shared_ptr< Pica::De
     for (unsigned i = 0; i < ARRAY_SIZE(input_data); ++i) {
         input_data[i] = new QLineEdit;
         input_data[i]->setValidator(new QDoubleValidator(input_data[i]));
+
+        QSizePolicy retain_size_policy = input_data[i]->sizePolicy();
+        retain_size_policy.setRetainSizeWhenHidden(true);
+        input_data[i]->setSizePolicy(retain_size_policy);
     }
 
     breakpoint_warning = new QLabel(tr("(data only available at VertexLoaded breakpoints)"));
@@ -401,10 +405,9 @@ GraphicsVertexShaderWidget::GraphicsVertexShaderWidget(std::shared_ptr< Pica::De
             row_layout->setContentsMargins(0, 0, 0, 0);
 
             row_layout->addWidget(new QLabel(tr("Attribute %1").arg(i, 2)));
+            row_layout->addWidget(input_data_mapping[i] = new QLabel);
             for (unsigned comp = 0; comp < 4; ++comp)
                 row_layout->addWidget(input_data[4 * i + comp]);
-
-            row_layout->addWidget(input_data_mapping[i] = new QLabel);
 
             input_data_container[i] = new QWidget;
             input_data_container[i]->setLayout(row_layout);
@@ -500,6 +503,10 @@ void GraphicsVertexShaderWidget::Reload(bool replace_vertex_data, void* vertex_d
         unsigned source_attr = shader_config.input_register_map.GetRegisterForAttribute(attr);
         input_data_mapping[attr]->setText(QString("-> v%1").arg(source_attr));
         input_data_container[attr]->setVisible(true);
+        int num_elements = Pica::g_state.regs.vertex_attributes.GetNumElements(attr);
+        for (unsigned comp = 0; comp < 4; ++comp) {
+            input_data[4 * attr + comp]->setVisible(comp < num_elements);
+        }
     }
     // Only show input attributes which are used as input to the shader
     for (unsigned int attr = num_attributes; attr < 16; ++attr) {
