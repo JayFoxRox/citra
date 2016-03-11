@@ -446,6 +446,8 @@ GraphicsVertexShaderWidget::GraphicsVertexShaderWidget(std::shared_ptr< Pica::De
             sub_layout->addWidget(output_data_container[i]);
         }
 
+        //TODO: add breakpoint warning
+
         output_data_group->setLayout(sub_layout);
         main_layout->addWidget(output_data_group);
     }
@@ -584,7 +586,9 @@ void GraphicsVertexShaderWidget::Reload(bool replace_vertex_data, void* vertex_d
                     break;
             }
             used = true;
-            mapping += std::string("{ ") + std::string(1, "xyzw"[comp]) + std::string(": ") + name + std::string(" }");
+            float value = debug_data.output[i][comp].ToFloat32();
+            // TODO: Check if we can and have to update this
+            mapping += std::string("{ ") + std::string(1, "xyzw"[comp]) + std::string(": ") + name + std::string(" = ") + std::to_string(value) + std::string(" }");
         }
         output_data_mapping[i]->setText(QString::fromStdString(mapping));
         output_data_container[i]->setVisible(used);

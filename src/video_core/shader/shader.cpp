@@ -189,6 +189,11 @@ DebugData<true> ProduceDebugInfo(const InputVertex& input, int num_attributes, c
     state.conditional_code[1] = false;
 
     RunInterpreter(state);
+
+    for(unsigned i = 0; i < 16; i++) {
+        state.debug.output[i] = state.registers.output[i];
+    }
+
     return state.debug;
 }
 

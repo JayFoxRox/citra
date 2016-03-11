@@ -160,6 +160,8 @@ struct DebugData<true> {
     u32 max_offset; // maximum program counter ever reached
     u32 max_opdesc_id; // maximum swizzle pattern index ever used
 
+    Math::Vec4<float24> output[16]; // output registers after execution
+
     // List of records for each executed shader instruction
     std::vector<DebugData<true>::Record> records;
 };
