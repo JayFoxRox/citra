@@ -70,6 +70,9 @@ private:
     std::array<QWidget*, 16> input_data_container; // QWidget containing the QLayout containing each vertex attribute
     std::array<QLabel*, 16> input_data_mapping; // A QLabel denoting the shader input attribute which the vertex attribute maps to
 
+    std::array<QWidget*, 7> output_data_container; // QWidget containing the QLayout containing each output register
+    std::array<QLabel*, 7> output_data_mapping; // A QLabel denoting the shader output attribute which the output register maps to
+
     // Text to be shown when input vertex data is not retrievable
     QLabel* breakpoint_warning;
 

@@ -422,6 +422,33 @@ GraphicsVertexShaderWidget::GraphicsVertexShaderWidget(std::shared_ptr< Pica::De
         input_data_group->setLayout(sub_layout);
         main_layout->addWidget(input_data_group);
     }
+    {
+        auto output_data_group = new QGroupBox(tr("Output Data"));
+
+        // For each output register, add a QHBoxLayout consisting of:
+        // - A QLabel denoting the source output register
+        // - A QLabel denoting the shader output component
+        auto sub_layout = new QVBoxLayout;
+        for (unsigned i = 0; i < 7; ++i) {
+            // Create an HBoxLayout to store the widgets used to specify a particular attribute
+            // and store it in a QWidget to allow for easy hiding and unhiding.
+            auto row_layout = new QHBoxLayout;
+            // Remove unecessary padding between rows
+            row_layout->setContentsMargins(0, 0, 0, 0);
+
+            row_layout->addWidget(new QLabel(tr("o%1").arg(i)));
+            row_layout->addWidget(output_data_mapping[i] = new QLabel);
+
+            output_data_container[i] = new QWidget;
+            output_data_container[i]->setLayout(row_layout);
+            output_data_container[i]->hide();
+
+            sub_layout->addWidget(output_data_container[i]);
+        }
+
+        output_data_group->setLayout(sub_layout);
+        main_layout->addWidget(output_data_group);
+    }
 
     // Make program listing expand to fill available space in the dialog
     binary_list->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::MinimumExpanding);
@@ -511,6 +538,56 @@ void GraphicsVertexShaderWidget::Reload(bool replace_vertex_data, void* vertex_d
     // Only show input attributes which are used as input to the shader
     for (unsigned int attr = num_attributes; attr < 16; ++attr) {
         input_data_container[attr]->setVisible(false);
+    }
+
+    // Reload widget state
+    for (int i = 0; i < 7; ++i) {
+
+        bool used = false;
+        std::string mapping = std::string("-> ");
+
+        auto& output = Pica::g_state.regs.vs_output_attributes[i];
+        Pica::Regs::VSOutputAttributes::Semantic map[] = {
+            output.map_x.Value(), output.map_y.Value(), output.map_z.Value(), output.map_w.Value()
+        };
+
+        for (unsigned comp = 0; comp < 4; ++comp) {
+
+            if (map[comp] == Pica::Regs::VSOutputAttributes::Semantic::INVALID)
+                continue;
+
+            std::string name;
+            switch(map[comp]) {
+                case Pica::Regs::VSOutputAttributes::Semantic::POSITION_X:   name = "pos.x";   break;
+                case Pica::Regs::VSOutputAttributes::Semantic::POSITION_Y:   name = "pos.z";   break;
+                case Pica::Regs::VSOutputAttributes::Semantic::POSITION_Z:   name = "pos.y";   break;
+                case Pica::Regs::VSOutputAttributes::Semantic::POSITION_W:   name = "pos.w";   break;
+                case Pica::Regs::VSOutputAttributes::Semantic::QUATERNION_X: name = "quat.x";  break;
+                case Pica::Regs::VSOutputAttributes::Semantic::QUATERNION_Y: name = "quat.y";  break;
+                case Pica::Regs::VSOutputAttributes::Semantic::QUATERNION_Z: name = "quat.z";  break;
+                case Pica::Regs::VSOutputAttributes::Semantic::QUATERNION_W: name = "quat.w";  break;
+                case Pica::Regs::VSOutputAttributes::Semantic::COLOR_R:      name = "color.r"; break;
+                case Pica::Regs::VSOutputAttributes::Semantic::COLOR_G:      name = "color.g"; break;
+                case Pica::Regs::VSOutputAttributes::Semantic::COLOR_B:      name = "color.b"; break;
+                case Pica::Regs::VSOutputAttributes::Semantic::COLOR_A:      name = "color.a"; break;
+                case Pica::Regs::VSOutputAttributes::Semantic::TEXCOORD0_U:  name = "tc0.u";   break;
+                case Pica::Regs::VSOutputAttributes::Semantic::TEXCOORD0_V:  name = "tc0.v";   break;
+                case Pica::Regs::VSOutputAttributes::Semantic::TEXCOORD1_U:  name = "tc1.u";   break;
+                case Pica::Regs::VSOutputAttributes::Semantic::TEXCOORD1_V:  name = "tc1.v";   break;
+                case Pica::Regs::VSOutputAttributes::Semantic::VIEW_X:       name = "view.x";  break;
+                case Pica::Regs::VSOutputAttributes::Semantic::VIEW_Y:       name = "view.y";  break;
+                case Pica::Regs::VSOutputAttributes::Semantic::VIEW_Z:       name = "view.z";  break;
+                case Pica::Regs::VSOutputAttributes::Semantic::TEXCOORD2_U:  name = "tc2.u";   break;
+                case Pica::Regs::VSOutputAttributes::Semantic::TEXCOORD2_V:  name = "tc2.v";   break;
+                default:
+                    name = std::string("Unknown[0x") + std::to_string(map[comp]) + std::string("]");
+                    break;
+            }
+            used = true;
+            mapping += std::string("{ ") + std::string(1, "xyzw"[comp]) + std::string(": ") + name + std::string(" }");
+        }
+        output_data_mapping[i]->setText(QString::fromStdString(mapping));
+        output_data_container[i]->setVisible(used);
     }
 
     // Initialize debug info text for current cycle count
