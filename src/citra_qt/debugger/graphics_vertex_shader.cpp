@@ -543,12 +543,19 @@ void GraphicsVertexShaderWidget::Reload(bool replace_vertex_data, void* vertex_d
     }
 
     // Reload widget state
+    unsigned int index = 0;
     for (int i = 0; i < 7; ++i) {
+
+        if (index >= Pica::g_state.regs.vs_output_total)
+            break;
+
+        if ((Pica::g_state.regs.vs.output_mask & (1 << i)) == 0)
+            continue;
 
         bool used = false;
         std::string mapping = std::string("-> ");
 
-        auto& output = Pica::g_state.regs.vs_output_attributes[i];
+        auto& output = Pica::g_state.regs.vs_output_attributes[index];
         Pica::Regs::VSOutputAttributes::Semantic map[] = {
             output.map_x.Value(), output.map_y.Value(), output.map_z.Value(), output.map_w.Value()
         };
@@ -589,9 +596,12 @@ void GraphicsVertexShaderWidget::Reload(bool replace_vertex_data, void* vertex_d
             float value = debug_data.output[i][comp].ToFloat32();
             // TODO: Check if we can and have to update this
             mapping += std::string("{ ") + std::string(1, "xyzw"[comp]) + std::string(": ") + name + std::string(" = ") + std::to_string(value) + std::string(" }");
+
         }
-        output_data_mapping[i]->setText(QString::fromStdString(mapping));
-        output_data_container[i]->setVisible(used);
+        output_data_mapping[index]->setText(QString::fromStdString(mapping));
+        output_data_container[index]->setVisible(used);
+
+        index++;
     }
 
     // Initialize debug info text for current cycle count
