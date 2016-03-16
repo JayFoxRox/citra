@@ -96,7 +96,7 @@ void GeometryDumper::AddTriangle(Vertex& v0, Vertex& v1, Vertex& v2) {
 
 void GeometryDumper::Dump() {
     static int index = 0;
-    std::string filename = std::string("geometry_dump") + std::to_string(++index) + ".obj";
+    std::string filename = std::string("geometry_dump_") + std::to_string(VideoCore::g_renderer->GetCurrentFrame()) + "_" + std::to_string(++index) + ".obj";
 
     std::ofstream file(filename);
 
@@ -104,6 +104,11 @@ void GeometryDumper::Dump() {
         file << "v " << vertex.pos[0]
              << " "  << vertex.pos[1]
              << " "  << vertex.pos[2] << std::endl;
+
+        file << "vn " << vertex.normal[0]
+             << " "  << vertex.normal[1]
+             << " "  << vertex.normal[2] << std::endl;
+
     }
 
     for (const Face& face : faces) {
@@ -253,7 +258,7 @@ void DumpShader(const std::string& filename, const Regs::ShaderConfig& config, c
     // TODO: Create a label table for "main"
 
     std::vector<nihstro::ConstantInfo> constant_table;
-    for (unsigned i = 0; i < setup.uniforms.b.size(); ++i) {
+    for (unsigned i = 0; i < sizeof(setup.uniforms.b) / sizeof(setup.uniforms.b[0]); ++i) {
         nihstro::ConstantInfo constant;
         memset(&constant, 0, sizeof(constant));
         constant.type = nihstro::ConstantInfo::Bool;
@@ -261,7 +266,7 @@ void DumpShader(const std::string& filename, const Regs::ShaderConfig& config, c
         constant.b = setup.uniforms.b[i];
         constant_table.emplace_back(constant);
     }
-    for (unsigned i = 0; i < setup.uniforms.i.size(); ++i) {
+    for (unsigned i = 0; i < sizeof(setup.uniforms.i) / sizeof(setup.uniforms.i[0]); ++i) {
         nihstro::ConstantInfo constant;
         memset(&constant, 0, sizeof(constant));
         constant.type = nihstro::ConstantInfo::Int;

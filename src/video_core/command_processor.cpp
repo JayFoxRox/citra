@@ -27,9 +27,11 @@ namespace Pica {
 
 namespace CommandProcessor {
 
-static int float_regs_counter = 0;
+static int vs_float_regs_counter = 0;
+static int gs_float_regs_counter = 0;
 
-static u32 uniform_write_buffer[4];
+static u32 vs_uniform_write_buffer[4];
+static u32 gs_uniform_write_buffer[4];
 
 static int default_attr_counter = 0;
 
@@ -46,6 +48,124 @@ static const u32 expand_bits_to_bytes[] = {
 };
 
 MICROPROFILE_DEFINE(GPU_Drawing, "GPU", "Drawing", MP_RGB(50, 50, 240));
+
+static bool UseGS(void) {
+    // TODO(ds84182): This would be more accurate if it looked at induvidual shader units for the geoshader bit
+    // gs_regs.input_buffer_config.use_geometry_shader == 0x08
+    assert(g_state.regs.using_geometry_shader == 2);
+    return g_state.regs.using_geometry_shader == 2;
+}
+
+// Returns true if the VS register writes are shared with the GS
+static bool SharedGS(void) {
+    return g_state.regs.vs_com_mode == Pica::Regs::VSComMode::Shared;
+}
+
+static Pica::Shader::UnitState<false>& GetShaderUnit(bool vs) {
+    // The worst scheduler you'll ever see!
+    if (vs) {
+        static unsigned shader_unit_scheduler = 0;
+        shader_unit_scheduler++;
+        shader_unit_scheduler %= 3; // FIXME: When does it also allow use of unit 3?!
+        return g_state.shader_unit[shader_unit_scheduler];
+    } else {
+        return g_state.shader_unit[3];
+    }
+}
+
+static void SetShaderCode(bool vs, u32 index, u32 value) {
+    if (vs && SharedGS()) {
+        SetShaderCode(false, index, value);
+    }
+    auto& setup = vs ? g_state.vs : g_state.gs;
+    setup.program_code[index] = value;
+}
+
+static void SetShaderSwizzle(bool vs, u32 index, u32 value) {
+    if (vs && SharedGS()) {
+        SetShaderSwizzle(false, index, value);
+    }
+    auto& setup = vs ? g_state.vs : g_state.gs;
+    setup.swizzle_data[index] = value;
+}
+
+static void LoadBoolUniform(bool vs, u32 value) {
+    if (vs && SharedGS()) {
+        LoadBoolUniform(false, value);
+    }
+    auto& setup = vs ? g_state.vs : g_state.gs;
+    for (unsigned i = 0; i < 16; ++i)
+        setup.uniforms.b[i] = (value & (1 << i)) != 0;
+}
+
+static void LoadIntUniform(bool vs, int index, u32 value) {
+    if (vs && SharedGS()) {
+        LoadIntUniform(false, index, value);
+    }
+    auto& setup = vs ? g_state.vs : g_state.gs;
+
+    union {
+        u32 raw;
+        BitField< 0, 8, u32> x;
+        BitField< 8, 8, u32> y;
+        BitField<16, 8, u32> z;
+        BitField<24, 8, u32> w;
+    } values;
+    values.raw = value;
+
+    setup.uniforms.i[index] = Math::Vec4<u8>(values.x, values.y, values.z, values.w);
+    LOG_TRACE(HW_GPU, "Set %s integer uniform %d to %02x %02x %02x %02x",
+              vs ? "VS" : "GS", index, values.x.Value(), values.y.Value(), values.z.Value(), values.w.Value());
+
+}
+
+// Returns true iff the current uniform was completly written
+static bool LoadFloatUniform(bool vs, Pica::Regs::ShaderConfig& config, const u32 uniform_write_buffer[], int float_regs_counter, u32 value) {
+    auto& setup = vs ? g_state.vs : g_state.gs;
+
+    auto& regs = g_state.regs;
+    auto& uniform_setup = config.uniform_setup;
+
+    // Uniforms are written in a packed format such that four float24 values are encoded in
+    // three 32-bit numbers. We write to internal memory once a full such vector is
+    // written.
+    if ((float_regs_counter >= 4 && uniform_setup.IsFloat32()) ||
+        (float_regs_counter >= 3 && !uniform_setup.IsFloat32())) {
+
+        if (vs && SharedGS()) {
+            LoadFloatUniform(false, config, uniform_write_buffer, float_regs_counter, value);
+        }
+
+        auto& uniform = setup.uniforms.f[uniform_setup.index];
+
+        if (uniform_setup.index > 95) {
+            LOG_ERROR(HW_GPU, "Invalid %s uniform index %d", vs ? "VS" : "GS", (int)uniform_setup.index);
+            return false;
+        }
+
+        // NOTE: The destination component order indeed is "backwards"
+        if (uniform_setup.IsFloat32()) {
+            for (auto i : {0,1,2,3})
+                uniform[3 - i] = float24::FromFloat32(*(float*)(&uniform_write_buffer[i]));
+        } else {
+            // TODO: Untested
+            uniform.w = float24::FromRaw(uniform_write_buffer[0] >> 8);
+            uniform.z = float24::FromRaw(((uniform_write_buffer[0] & 0xFF) << 16) | ((uniform_write_buffer[1] >> 16) & 0xFFFF));
+            uniform.y = float24::FromRaw(((uniform_write_buffer[1] & 0xFFFF) << 8) | ((uniform_write_buffer[2] >> 24) & 0xFF));
+            uniform.x = float24::FromRaw(uniform_write_buffer[2] & 0xFFFFFF);
+        }
+
+        LOG_TRACE(HW_GPU, "Set %s float uniform %x to (%f %f %f %f)",
+                  vs ? "VS" : "GS", (int)uniform_setup.index,
+                  uniform.x.ToFloat32(), uniform.y.ToFloat32(), uniform.z.ToFloat32(),
+                  uniform.w.ToFloat32());
+
+        return true;
+
+    }
+
+    return false;
+}
 
 static void WritePicaReg(u32 id, u32 value, u32 mask) {
     auto& regs = g_state.regs;
@@ -124,9 +244,12 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
 
                 // TODO: Verify that this actually modifies the register!
                 if (setup.index < 15) {
-                    g_state.vs.default_attributes[setup.index] = attribute;
+                    g_state.default_attributes[setup.index] = attribute;
                     setup.index++;
                 } else {
+
+                    ASSERT_MSG(!UseGS(), "immediate mode not supported with GS!");
+
                     // Put each attribute into an immediate input buffer.
                     // When all specified immediate attributes are present, the Vertex Shader is invoked and everything is
                     // sent to the primitive assembler.
@@ -139,14 +262,17 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
                     if (immediate_attribute_id >= regs.vs.num_input_attributes+1) {
                         immediate_attribute_id = 0;
 
-                        Shader::UnitState<false> shader_unit;
-                        Shader::Setup(shader_unit);
-
-                        if (g_debug_context)
-                            g_debug_context->OnEvent(DebugContext::Event::VertexLoaded, static_cast<void*>(&immediate_input));
+                        auto& unit_state = GetShaderUnit(true);
+                        Shader::Setup(g_state.regs.vs, g_state.vs);
 
                         // Send to vertex shader
-                        Shader::OutputVertex output = Shader::Run(shader_unit, immediate_input, regs.vs.num_input_attributes+1);
+                        if (g_debug_context)
+                            g_debug_context->OnEvent(DebugContext::Event::RunVS, static_cast<void*>(&immediate_input));
+                        Shader::Run(g_state.regs.vs, g_state.vs, unit_state, immediate_input, regs.vs.num_input_attributes+1);
+
+                        // Receive VS outputs
+                        auto& output_registers = unit_state.registers.output;
+                        auto output_vertex = Shader::GenerateOutputVertex(output_registers);
 
                         // Send to renderer
                         using Pica::Shader::OutputVertex;
@@ -154,7 +280,7 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
                             VideoCore::g_renderer->Rasterizer()->AddTriangle(v0, v1, v2);
                         };
 
-                        g_state.primitive_assembler.SubmitVertex(output, AddTriangle);
+                        g_state.primitive_assembler.SubmitVertex(output_vertex, AddTriangle);
                     }
                 }
             }
@@ -298,13 +424,10 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
             // The size has been tuned for optimal balance between hit-rate and the cost of lookup
             const size_t VERTEX_CACHE_SIZE = 32;
             std::array<u16, VERTEX_CACHE_SIZE> vertex_cache_ids;
-            std::array<Shader::OutputVertex, VERTEX_CACHE_SIZE> vertex_cache;
+            std::array<Math::Vec4<float24>[16], VERTEX_CACHE_SIZE> vertex_cache;
 
             unsigned int vertex_cache_pos = 0;
             vertex_cache_ids.fill(-1);
-
-            Shader::UnitState<false> shader_unit;
-            Shader::Setup(shader_unit);
 
             for (unsigned int index = 0; index < regs.num_vertices; ++index)
             {
@@ -315,8 +438,11 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
                 // the PICA supports it, and it would mess up the caching, guard against it here.
                 ASSERT(vertex != -1);
 
+                auto& unit_state = GetShaderUnit(true);
+                Shader::Setup(g_state.regs.vs, g_state.vs);
+
                 bool vertex_cache_hit = false;
-                Shader::OutputVertex output;
+                auto& output_registers = unit_state.registers.output;
 
                 if (is_indexed) {
                     if (g_debug_context && Pica::g_debug_context->recorder) {
@@ -324,15 +450,21 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
                         memory_accesses.AddAccess(base_address + index_info.offset + size * index, size);
                     }
 
+#if PICA_DUMP_GEOMETRY
+                    vertex_cache_hit = false;
+#else
                     for (unsigned int i = 0; i < VERTEX_CACHE_SIZE; ++i) {
                         if (vertex == vertex_cache_ids[i]) {
-                            output = vertex_cache[i];
+                            for (unsigned int j = 0; j < 16; ++j)
+                                output_registers[j] = vertex_cache[i][j];
                             vertex_cache_hit = true;
                             break;
                         }
                     }
+#endif
                 }
 
+                //FIXME: Disable cache when observing the RunVS breakpoint or option to track cache hits
                 if (!vertex_cache_hit) {
                     // Initialize data for the current vertex
                     Shader::InputVertex input;
@@ -373,7 +505,7 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
                             }
                         } else if (attribute_config.IsDefaultAttribute(i)) {
                             // Load the default attribute if we're configured to do so
-                            input.attr[i] = g_state.vs.default_attributes[i];
+                            input.attr[i] = g_state.default_attributes[i];
                             LOG_TRACE(HW_GPU, "Loaded default attribute %x for vertex %x (index %x): (%f, %f, %f, %f)",
                                       i, vertex, index,
                                       input.attr[i][0].ToFloat32(), input.attr[i][1].ToFloat32(),
@@ -385,25 +517,27 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
                         }
                     }
 
-                    if (g_debug_context)
-                        g_debug_context->OnEvent(DebugContext::Event::VertexLoaded, (void*)&input);
-
 #if PICA_DUMP_GEOMETRY
                     // NOTE: When dumping geometry, we simply assume that the first input attribute
                     //       corresponds to the position for now.
                     DebugUtils::GeometryDumper::Vertex dumped_vertex = {
-                        input.attr[0][0].ToFloat32(), input.attr[0][1].ToFloat32(), input.attr[0][2].ToFloat32()
+                        { input.attr[0][0].ToFloat32(), input.attr[0][1].ToFloat32(), input.attr[0][2].ToFloat32() },
+                        { input.attr[1][0].ToFloat32(), input.attr[1][1].ToFloat32(), input.attr[1][2].ToFloat32() }
                     };
                     using namespace std::placeholders;
                     dumping_primitive_assembler.SubmitVertex(dumped_vertex,
                                                              std::bind(&DebugUtils::GeometryDumper::AddTriangle,
                                                                        &geometry_dumper, _1, _2, _3));
 #endif
+
                     // Send to vertex shader
-                    output = Shader::Run(shader_unit, input, attribute_config.GetNumTotalAttributes());
+                    if (g_debug_context)
+                        g_debug_context->OnEvent(DebugContext::Event::RunVS, (void*)&input);
+                    Shader::Run(g_state.regs.vs, g_state.vs, unit_state, input, attribute_config.GetNumTotalAttributes());
 
                     if (is_indexed) {
-                        vertex_cache[vertex_cache_pos] = output;
+                        for (unsigned int i = 0; i < 16; ++i)
+                            vertex_cache[vertex_cache_pos][i] = output_registers[i];
                         vertex_cache_ids[vertex_cache_pos] = vertex;
                         vertex_cache_pos = (vertex_cache_pos + 1) % VERTEX_CACHE_SIZE;
                     }
@@ -416,7 +550,73 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
                     VideoCore::g_renderer->Rasterizer()->AddTriangle(v0, v1, v2);
                 };
 
-                primitive_assembler.SubmitVertex(output, AddTriangle);
+                if (UseGS()) {
+
+                    auto& regs = g_state.regs;
+                    auto& gs_regs = g_state.regs.gs;
+                    auto& gs_buf = g_state.gs_input_buffer;
+
+                    // Vertex Shader Outputs are converted into Geometry Shader inputs by filling up a buffer
+                    // For example, if we have a geoshader that takes 6 inputs, and the vertex shader outputs 2 attributes
+                    // It would take 3 vertices to fill up the Geometry Shader buffer
+                    unsigned int gs_input_count = gs_regs.num_input_attributes + 1;
+                    unsigned int vs_output_count = regs.vs_outmap_total2 + 1;
+                    ASSERT_MSG(regs.vs_outmap_total1 == regs.vs_outmap_total2, "VS_OUTMAP_TOTAL1 and VS_OUTMAP_TOTAL2 don't match!");
+                    // copy into the geoshader buffer
+                    for (unsigned int i=0; i<vs_output_count; i++) {
+                        if (gs_buf.index >= gs_input_count) {
+                            // TODO(ds84182): LOG_ERROR()
+                            assert(false);
+                            continue;
+                        }
+                        gs_buf.buffer.attr[gs_buf.index++] = output_registers[i];
+                    }
+
+#if 0
+static int foo = 0;
+if (foo++ > 500) {
+printf("regs[0x25E]: 0x%08X\n", regs[0x25E]);
+printf("gsh_misc0: 0x%08X\n", regs.gsh_misc0);
+printf("gs_buf.index: %d / gs_input_count: %d [vs_output_count: %d]\n",gs_buf.index, gs_input_count, vs_output_count);
+foo = 0;
+}
+#endif
+
+                    if (gs_buf.index >= gs_input_count) {
+                        // I have no clue what happens when the number of geoshader inputs is not divisible by vertex shader output
+                        // count (nGeoInput%nVtxOutput != 0)
+                        // For right now, just assert.
+                        // TODO(ds84182): Verify hardware behavior
+#if 0
+                        ASSERT_MSG(gs_input_count%vs_output_count == 0,
+                            "Number of GS inputs (%d) is not divisible by number of VS outputs (%d)",
+                            gs_input_count, vs_output_count);
+#endif
+
+                        // Assign shader unit for this job
+                        auto& gs_unit_state = GetShaderUnit(false);
+                        gs_unit_state.emit_triangle_callback = AddTriangle;
+                        Shader::Setup(g_state.regs.gs, g_state.gs);
+
+                        g_state.gs.uniforms.b[15] |= (index > 0);
+
+                        // Process Geometry Shader
+                        if (g_debug_context)
+                            g_debug_context->OnEvent(DebugContext::Event::RunGS, (void*)&gs_buf.buffer);
+//printf("BEFORE GS: r15.z: %f\n", gs_unit_state.temporary[15].z.ToFloat32());
+                        Shader::Run(g_state.regs.gs, g_state.gs, gs_unit_state, gs_buf.buffer, gs_input_count);
+//printf("AFTER  GS: r15.z: %f\n", gs_unit_state.temporary[15].z.ToFloat32());
+
+                        gs_buf.index = 0;
+                    }
+
+                } else {
+
+                    Shader::OutputVertex output_vertex = Shader::GenerateOutputVertex(output_registers);
+                    primitive_assembler.SubmitVertex(output_vertex, AddTriangle);
+
+                }
+
             }
 
             for (auto& range : memory_accesses.ranges) {
@@ -431,11 +631,81 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
             break;
         }
 
-        case PICA_REG_INDEX(vs.bool_uniforms):
-            for (unsigned i = 0; i < 16; ++i)
-                g_state.vs.uniforms.b[i] = (regs.vs.bool_uniforms.Value() & (1 << i)) != 0;
-
+        case PICA_REG_INDEX(gs.bool_uniforms):
+        {
+            LoadBoolUniform(false, value);
             break;
+        }
+
+        case PICA_REG_INDEX_WORKAROUND(gs.int_uniforms[0], 0x281):
+        case PICA_REG_INDEX_WORKAROUND(gs.int_uniforms[1], 0x282):
+        case PICA_REG_INDEX_WORKAROUND(gs.int_uniforms[2], 0x283):
+        case PICA_REG_INDEX_WORKAROUND(gs.int_uniforms[3], 0x284):
+        {
+            int index = (id - PICA_REG_INDEX_WORKAROUND(gs.int_uniforms[0], 0x281));
+            LoadIntUniform(false, index, value);
+            break;
+        }
+
+        case PICA_REG_INDEX_WORKAROUND(gs.uniform_setup.set_value[0], 0x291):
+        case PICA_REG_INDEX_WORKAROUND(gs.uniform_setup.set_value[1], 0x292):
+        case PICA_REG_INDEX_WORKAROUND(gs.uniform_setup.set_value[2], 0x293):
+        case PICA_REG_INDEX_WORKAROUND(gs.uniform_setup.set_value[3], 0x294):
+        case PICA_REG_INDEX_WORKAROUND(gs.uniform_setup.set_value[4], 0x295):
+        case PICA_REG_INDEX_WORKAROUND(gs.uniform_setup.set_value[5], 0x296):
+        case PICA_REG_INDEX_WORKAROUND(gs.uniform_setup.set_value[6], 0x297):
+        case PICA_REG_INDEX_WORKAROUND(gs.uniform_setup.set_value[7], 0x298):
+        {
+            //FIXME: Is the index used?!
+            auto& config = g_state.regs.gs;
+            // TODO: Does actual hardware indeed keep an intermediate buffer or does
+            //       it directly write the values?
+            gs_uniform_write_buffer[gs_float_regs_counter++] = value;
+            if (LoadFloatUniform(false, config, gs_uniform_write_buffer, gs_float_regs_counter, value)) {
+                gs_float_regs_counter = 0;
+                // TODO: Verify that this actually modifies the register!
+                config.uniform_setup.index.Assign(config.uniform_setup.index + 1);
+            }
+            break;
+        }
+
+        // Load shader program code
+        case PICA_REG_INDEX_WORKAROUND(gs.program.set_word[0], 0x29c):
+        case PICA_REG_INDEX_WORKAROUND(gs.program.set_word[1], 0x29d):
+        case PICA_REG_INDEX_WORKAROUND(gs.program.set_word[2], 0x29e):
+        case PICA_REG_INDEX_WORKAROUND(gs.program.set_word[3], 0x29f):
+        case PICA_REG_INDEX_WORKAROUND(gs.program.set_word[4], 0x2a0):
+        case PICA_REG_INDEX_WORKAROUND(gs.program.set_word[5], 0x2a1):
+        case PICA_REG_INDEX_WORKAROUND(gs.program.set_word[6], 0x2a2):
+        case PICA_REG_INDEX_WORKAROUND(gs.program.set_word[7], 0x2a3):
+        {
+            auto& config = g_state.regs.gs;
+            SetShaderCode(false, config.program.offset, value);
+            config.program.offset++;
+            break;
+        }
+
+        // Load swizzle pattern data
+        case PICA_REG_INDEX_WORKAROUND(gs.swizzle_patterns.set_word[0], 0x2a6):
+        case PICA_REG_INDEX_WORKAROUND(gs.swizzle_patterns.set_word[1], 0x2a7):
+        case PICA_REG_INDEX_WORKAROUND(gs.swizzle_patterns.set_word[2], 0x2a8):
+        case PICA_REG_INDEX_WORKAROUND(gs.swizzle_patterns.set_word[3], 0x2a9):
+        case PICA_REG_INDEX_WORKAROUND(gs.swizzle_patterns.set_word[4], 0x2aa):
+        case PICA_REG_INDEX_WORKAROUND(gs.swizzle_patterns.set_word[5], 0x2ab):
+        case PICA_REG_INDEX_WORKAROUND(gs.swizzle_patterns.set_word[6], 0x2ac):
+        case PICA_REG_INDEX_WORKAROUND(gs.swizzle_patterns.set_word[7], 0x2ad):
+        {
+            auto& config = g_state.regs.gs;
+            SetShaderSwizzle(false, config.swizzle_patterns.offset, value);
+            config.swizzle_patterns.offset++;
+            break;
+        }
+
+        case PICA_REG_INDEX(vs.bool_uniforms):
+        {
+            LoadBoolUniform(true, value);
+            break;
+        }
 
         case PICA_REG_INDEX_WORKAROUND(vs.int_uniforms[0], 0x2b1):
         case PICA_REG_INDEX_WORKAROUND(vs.int_uniforms[1], 0x2b2):
@@ -443,10 +713,7 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
         case PICA_REG_INDEX_WORKAROUND(vs.int_uniforms[3], 0x2b4):
         {
             int index = (id - PICA_REG_INDEX_WORKAROUND(vs.int_uniforms[0], 0x2b1));
-            auto values = regs.vs.int_uniforms[index];
-            g_state.vs.uniforms.i[index] = Math::Vec4<u8>(values.x, values.y, values.z, values.w);
-            LOG_TRACE(HW_GPU, "Set integer uniform %d to %02x %02x %02x %02x",
-                      index, values.x.Value(), values.y.Value(), values.z.Value(), values.w.Value());
+            LoadIntUniform(true, index, value);
             break;
         }
 
@@ -459,44 +726,14 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
         case PICA_REG_INDEX_WORKAROUND(vs.uniform_setup.set_value[6], 0x2c7):
         case PICA_REG_INDEX_WORKAROUND(vs.uniform_setup.set_value[7], 0x2c8):
         {
-            auto& uniform_setup = regs.vs.uniform_setup;
-
+            auto& config = g_state.regs.vs;
             // TODO: Does actual hardware indeed keep an intermediate buffer or does
             //       it directly write the values?
-            uniform_write_buffer[float_regs_counter++] = value;
-
-            // Uniforms are written in a packed format such that four float24 values are encoded in
-            // three 32-bit numbers. We write to internal memory once a full such vector is
-            // written.
-            if ((float_regs_counter >= 4 && uniform_setup.IsFloat32()) ||
-                (float_regs_counter >= 3 && !uniform_setup.IsFloat32())) {
-                float_regs_counter = 0;
-
-                auto& uniform = g_state.vs.uniforms.f[uniform_setup.index];
-
-                if (uniform_setup.index > 95) {
-                    LOG_ERROR(HW_GPU, "Invalid VS uniform index %d", (int)uniform_setup.index);
-                    break;
-                }
-
-                // NOTE: The destination component order indeed is "backwards"
-                if (uniform_setup.IsFloat32()) {
-                    for (auto i : {0,1,2,3})
-                        uniform[3 - i] = float24::FromFloat32(*(float*)(&uniform_write_buffer[i]));
-                } else {
-                    // TODO: Untested
-                    uniform.w = float24::FromRaw(uniform_write_buffer[0] >> 8);
-                    uniform.z = float24::FromRaw(((uniform_write_buffer[0] & 0xFF) << 16) | ((uniform_write_buffer[1] >> 16) & 0xFFFF));
-                    uniform.y = float24::FromRaw(((uniform_write_buffer[1] & 0xFFFF) << 8) | ((uniform_write_buffer[2] >> 24) & 0xFF));
-                    uniform.x = float24::FromRaw(uniform_write_buffer[2] & 0xFFFFFF);
-                }
-
-                LOG_TRACE(HW_GPU, "Set uniform %x to (%f %f %f %f)", (int)uniform_setup.index,
-                          uniform.x.ToFloat32(), uniform.y.ToFloat32(), uniform.z.ToFloat32(),
-                          uniform.w.ToFloat32());
-
+            vs_uniform_write_buffer[vs_float_regs_counter++] = value;
+            if (LoadFloatUniform(true, config, vs_uniform_write_buffer, vs_float_regs_counter, value)) {
+                vs_float_regs_counter = 0;
                 // TODO: Verify that this actually modifies the register!
-                uniform_setup.index.Assign(uniform_setup.index + 1);
+                config.uniform_setup.index.Assign(config.uniform_setup.index + 1);
             }
             break;
         }
@@ -511,8 +748,9 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
         case PICA_REG_INDEX_WORKAROUND(vs.program.set_word[6], 0x2d2):
         case PICA_REG_INDEX_WORKAROUND(vs.program.set_word[7], 0x2d3):
         {
-            g_state.vs.program_code[regs.vs.program.offset] = value;
-            regs.vs.program.offset++;
+            auto& config = g_state.regs.vs;
+            SetShaderCode(true, config.program.offset, value);
+            config.program.offset++;
             break;
         }
 
@@ -526,8 +764,9 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
         case PICA_REG_INDEX_WORKAROUND(vs.swizzle_patterns.set_word[6], 0x2dc):
         case PICA_REG_INDEX_WORKAROUND(vs.swizzle_patterns.set_word[7], 0x2dd):
         {
-            g_state.vs.swizzle_data[regs.vs.swizzle_patterns.offset] = value;
-            regs.vs.swizzle_patterns.offset++;
+            auto& config = g_state.regs.vs;
+            SetShaderSwizzle(true, config.swizzle_patterns.offset, value);
+            config.swizzle_patterns.offset++;
             break;
         }
 

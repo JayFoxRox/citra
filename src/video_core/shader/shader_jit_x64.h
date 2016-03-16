@@ -24,7 +24,7 @@ constexpr size_t jit_shader_size = 1024 * 512;
 /// Memory allocated for the JIT code space cache
 constexpr size_t jit_cache_size = 1024 * 1024 * 8;
 
-using CompiledShader = void(void* registers);
+using CompiledShader = void(const void* uniforms, const void* state);
 
 /**
  * This class implements the shader JIT compiler. It recompiles a Pica shader program into x86_64
@@ -34,7 +34,8 @@ class JitCompiler : public Gen::XCodeBlock {
 public:
     JitCompiler();
 
-    CompiledShader* Compile();
+    CompiledShader* Compile(const ShaderSetup& setup, const Regs::ShaderConfig& config);
+  //  CompiledShader* Compile();
 
     void Clear();
 
@@ -61,6 +62,8 @@ public:
     void Compile_CALLU(Instruction instr);
     void Compile_IF(Instruction instr);
     void Compile_LOOP(Instruction instr);
+    void Compile_EMIT(Instruction instr);
+    void Compile_SETEMIT(Instruction instr);
     void Compile_JMP(Instruction instr);
     void Compile_CMP(Instruction instr);
     void Compile_MAD(Instruction instr);
@@ -82,6 +85,9 @@ private:
     void Compile_UniformCondition(Instruction instr);
 
     BitSet32 PersistentCallerSavedRegs();
+
+    /// Used for code and swizzle data at compile time
+    const ShaderSetup* setup;
 
     /// Pointer to the variable that stores the current Pica code offset. Used to handle nested code blocks.
     unsigned* offset_ptr = nullptr;

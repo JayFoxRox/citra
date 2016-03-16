@@ -24,6 +24,7 @@
 #include "citra_qt/debugger/graphics_breakpoints.h"
 #include "citra_qt/debugger/graphics_cmdlists.h"
 #include "citra_qt/debugger/graphics_framebuffer.h"
+#include "citra_qt/debugger/graphics_geometry_shader.h"
 #include "citra_qt/debugger/graphics_tracing.h"
 #include "citra_qt/debugger/graphics_vertex_shader.h"
 #include "citra_qt/debugger/profiler.h"
@@ -100,6 +101,10 @@ GMainWindow::GMainWindow() : emu_thread(nullptr)
     addDockWidget(Qt::RightDockWidgetArea, graphicsFramebufferWidget);
     graphicsFramebufferWidget->hide();
 
+    auto graphicsGeometryShaderWidget = new GraphicsGeometryShaderWidget(Pica::g_debug_context, this);
+    addDockWidget(Qt::RightDockWidgetArea, graphicsGeometryShaderWidget);
+    graphicsGeometryShaderWidget->hide();
+
     auto graphicsVertexShaderWidget = new GraphicsVertexShaderWidget(Pica::g_debug_context, this);
     addDockWidget(Qt::RightDockWidgetArea, graphicsVertexShaderWidget);
     graphicsVertexShaderWidget->hide();
@@ -118,6 +123,7 @@ GMainWindow::GMainWindow() : emu_thread(nullptr)
     debug_menu->addAction(graphicsCommandsWidget->toggleViewAction());
     debug_menu->addAction(graphicsBreakpointsWidget->toggleViewAction());
     debug_menu->addAction(graphicsFramebufferWidget->toggleViewAction());
+    debug_menu->addAction(graphicsGeometryShaderWidget->toggleViewAction());
     debug_menu->addAction(graphicsVertexShaderWidget->toggleViewAction());
     debug_menu->addAction(graphicsTracingWidget->toggleViewAction());
 

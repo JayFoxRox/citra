@@ -16,7 +16,7 @@
 #include <QSpinBox>
 #include <QTreeView>
 
-#include "citra_qt/debugger/graphics_vertex_shader.h"
+#include "citra_qt/debugger/graphics_geometry_shader.h"
 #include "citra_qt/util/util.h"
 
 #include "video_core/pica.h"
@@ -28,19 +28,19 @@ using nihstro::Instruction;
 using nihstro::SourceRegister;
 using nihstro::SwizzlePattern;
 
-GraphicsVertexShaderModel::GraphicsVertexShaderModel(GraphicsVertexShaderWidget* parent): QAbstractTableModel(parent), par(parent) {
+GraphicsGeometryShaderModel::GraphicsGeometryShaderModel(GraphicsGeometryShaderWidget* parent): QAbstractTableModel(parent), par(parent) {
 
 }
 
-int GraphicsVertexShaderModel::columnCount(const QModelIndex& parent) const {
+int GraphicsGeometryShaderModel::columnCount(const QModelIndex& parent) const {
     return 3;
 }
 
-int GraphicsVertexShaderModel::rowCount(const QModelIndex& parent) const {
+int GraphicsGeometryShaderModel::rowCount(const QModelIndex& parent) const {
     return static_cast<int>(par->info.code.size());
 }
 
-QVariant GraphicsVertexShaderModel::headerData(int section, Qt::Orientation orientation, int role) const {
+QVariant GraphicsGeometryShaderModel::headerData(int section, Qt::Orientation orientation, int role) const {
     switch(role) {
     case Qt::DisplayRole:
     {
@@ -81,7 +81,7 @@ static void print_input(std::ostringstream& output, const SourceRegister& input,
     output << '.' << swizzle_mask;
 };
 
-QVariant GraphicsVertexShaderModel::data(const QModelIndex& index, int role) const {
+QVariant GraphicsGeometryShaderModel::data(const QModelIndex& index, int role) const {
     switch (role) {
     case Qt::DisplayRole:
     {
@@ -179,17 +179,9 @@ QVariant GraphicsVertexShaderModel::data(const QModelIndex& index, int role) con
                     AlignToColumn(kOutputColumnWidth);
                     print_input(output, src1, swizzle.negate_src1, SelectorToString(swizzle.src1_selector));
                     AlignToColumn(kInputOperandColumnWidth);
-                    if (src_is_inverted) {
-                      print_input(output, src2, swizzle.negate_src2, SelectorToString(swizzle.src2_selector));
-                    } else {
-                      print_input(output, src2, swizzle.negate_src2, SelectorToString(swizzle.src2_selector), true, instr.mad.AddressRegisterName());
-                    }
+                    print_input(output, src2, swizzle.negate_src2, SelectorToString(swizzle.src2_selector));
                     AlignToColumn(kInputOperandColumnWidth);
-                    if (src_is_inverted) {
-                      print_input(output, src3, swizzle.negate_src3, SelectorToString(swizzle.src3_selector), true, instr.mad.AddressRegisterName());
-                    } else {
-                      print_input(output, src3, swizzle.negate_src3, SelectorToString(swizzle.src3_selector));
-                    }
+                    print_input(output, src3, swizzle.negate_src3, SelectorToString(swizzle.src3_selector));
                     AlignToColumn(kInputOperandColumnWidth);
                     break;
                 }
@@ -285,7 +277,20 @@ QVariant GraphicsVertexShaderModel::data(const QModelIndex& index, int role) con
             }
 
             default:
-                output << " (unknown instruction format)";
+
+                switch (opcode.EffectiveOpCode()) {
+                case OpCode::Id::SETEMIT:
+                    output << " "
+                           << "winding:" << instr.setemit.winding << "; "
+                           << "prim_emit:" << instr.setemit.prim_emit << "; "
+                           << "vertex_id:" << instr.setemit.vertex_id << "; "
+                           << "raw:" << std::hex << *(u32*)&instr.setemit;
+                    break;
+
+                default:
+                    output << " (unknown instruction format)";
+                    break;
+                }
                 break;
             }
 
@@ -302,6 +307,7 @@ QVariant GraphicsVertexShaderModel::data(const QModelIndex& index, int role) con
 
     case Qt::BackgroundRole:
     {
+#if 1
         // Highlight current instruction
         int current_record_index = par->cycle_index->value();
         if (current_record_index < static_cast<int>(par->debug_data.records.size())) {
@@ -315,7 +321,7 @@ QVariant GraphicsVertexShaderModel::data(const QModelIndex& index, int role) con
         for (const auto& record : par->debug_data.records)
             if (index.row() == static_cast<int>(record.instruction_offset))
                 return QVariant();
-
+#endif
         return QBrush(QColor(192, 192, 192));
     }
 
@@ -330,7 +336,9 @@ QVariant GraphicsVertexShaderModel::data(const QModelIndex& index, int role) con
     return QVariant();
 }
 
-void GraphicsVertexShaderWidget::DumpShader() {
+void GraphicsGeometryShaderWidget::DumpShader() {
+//FIXME?!
+#if 0
     QString filename = QFileDialog::getSaveFileName(this, tr("Save Shader Dump"), "shader_dump.shbin",
                                                     tr("Shader Binary (*.shbin)"));
 
@@ -339,16 +347,17 @@ void GraphicsVertexShaderWidget::DumpShader() {
         return;
     }
 
-    auto& setup  = Pica::g_state.vs;
-    auto& config = Pica::g_state.regs.vs;
+    auto& setup  = Pica::g_state.gs;
+    auto& config = Pica::g_state.regs.gs;
 
     Pica::DebugUtils::DumpShader(filename.toStdString(), config, setup, Pica::g_state.regs.vs_output_attributes);
+#endif
 }
 
-GraphicsVertexShaderWidget::GraphicsVertexShaderWidget(std::shared_ptr< Pica::DebugContext > debug_context,
+GraphicsGeometryShaderWidget::GraphicsGeometryShaderWidget(std::shared_ptr< Pica::DebugContext > debug_context,
                                                        QWidget* parent)
-        : BreakPointObserverDock(debug_context, "Pica Vertex Shader (Unit 0)", parent) {
-    setObjectName("PicaVertexShader");
+        : BreakPointObserverDock(debug_context, "Pica Geometry Shader", parent) {
+    setObjectName("PicaGeometryShader");
 
     // Clear input vertex data so that it contains valid float values in case a debug shader
     // execution happens before the first Vertex Loaded breakpoint.
@@ -365,11 +374,11 @@ GraphicsVertexShaderWidget::GraphicsVertexShaderWidget(std::shared_ptr< Pica::De
         input_data[i]->setValidator(new QDoubleValidator(input_data[i]));
     }
 
-    breakpoint_warning = new QLabel(tr("(data only available at 'Run VS' breakpoints)"));
+    breakpoint_warning = new QLabel(tr("(data only available at 'Run GS' breakpoints)"));
 
     // TODO: Add some button for jumping to the shader entry point
 
-    model = new GraphicsVertexShaderModel(this);
+    model = new GraphicsGeometryShaderModel(this);
     binary_list = new QTreeView;
     binary_list->setModel(model);
     binary_list->setRootIsDecorated(false);
@@ -452,9 +461,9 @@ GraphicsVertexShaderWidget::GraphicsVertexShaderWidget(std::shared_ptr< Pica::De
     widget()->setEnabled(false);
 }
 
-void GraphicsVertexShaderWidget::OnBreakPointHit(Pica::DebugContext::Event event, void* data) {
+void GraphicsGeometryShaderWidget::OnBreakPointHit(Pica::DebugContext::Event event, void* data) {
     auto input = static_cast<Pica::Shader::InputVertex*>(data);
-    if (event == Pica::DebugContext::Event::RunVS) {
+    if (event == Pica::DebugContext::Event::RunGS) {
         Reload(true, data);
     } else {
         // No vertex data is retrievable => invalidate currently stored vertex data
@@ -463,7 +472,7 @@ void GraphicsVertexShaderWidget::OnBreakPointHit(Pica::DebugContext::Event event
     widget()->setEnabled(true);
 }
 
-void GraphicsVertexShaderWidget::Reload(bool replace_vertex_data, void* vertex_data) {
+void GraphicsGeometryShaderWidget::Reload(bool replace_vertex_data, void* vertex_data) {
     model->beginResetModel();
 
     if (replace_vertex_data) {
@@ -488,17 +497,17 @@ void GraphicsVertexShaderWidget::Reload(bool replace_vertex_data, void* vertex_d
     // Reload shader code
     info.Clear();
 
-    const auto& shader_config = Pica::g_state.regs.vs;
-    const auto& shader_setup = Pica::g_state.vs;
-    const auto& unit_state = Pica::g_state.shader_unit[0];
+    const auto& shader_config = Pica::g_state.regs.gs;
+    const auto& shader_setup = Pica::g_state.gs;
+    const auto& unit_state = Pica::g_state.shader_unit[3];
     for (auto instr : shader_setup.program_code)
         info.code.push_back({instr});
-    int num_attributes = Pica::g_state.regs.vertex_attributes.GetNumTotalAttributes();
+    int num_attributes = shader_config.num_input_attributes + 1;
 
     for (auto pattern : shader_setup.swizzle_data)
         info.swizzle_info.push_back({pattern});
 
-    u32 entry_point = Pica::g_state.regs.vs.main_offset;
+    u32 entry_point = Pica::g_state.regs.gs.main_offset;
     info.labels.insert({ entry_point, "main" });
 
     // Generate debug information
@@ -516,24 +525,26 @@ void GraphicsVertexShaderWidget::Reload(bool replace_vertex_data, void* vertex_d
     }
 
     // Initialize debug info text for current cycle count
+#if 1
     cycle_index->setMaximum(debug_data.records.size() - 1);
     OnCycleIndexChanged(cycle_index->value());
+#endif
 
     model->endResetModel();
 }
 
-void GraphicsVertexShaderWidget::OnResumed() {
+void GraphicsGeometryShaderWidget::OnResumed() {
     widget()->setEnabled(false);
 }
 
-void GraphicsVertexShaderWidget::OnInputAttributeChanged(int index) {
+void GraphicsGeometryShaderWidget::OnInputAttributeChanged(int index) {
     float value = input_data[index]->text().toFloat();
     input_vertex.attr[index / 4][index % 4] = Pica::float24::FromFloat32(value);
     // Re-execute shader with updated value
     Reload();
 }
 
-void GraphicsVertexShaderWidget::OnCycleIndexChanged(int index) {
+void GraphicsGeometryShaderWidget::OnCycleIndexChanged(int index) {
     QString text;
 
     auto& record = debug_data.records[index];

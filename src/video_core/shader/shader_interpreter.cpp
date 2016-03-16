@@ -8,6 +8,7 @@
 #include "common/file_util.h"
 #include "video_core/pica.h"
 #include "video_core/pica_state.h"
+#include "video_core/debug_utils/debug_utils.h"
 #include "video_core/shader/shader.h"
 #include "video_core/shader/shader_interpreter.h"
 
@@ -22,13 +23,16 @@ namespace Pica {
 namespace Shader {
 
 template<bool Debug>
-void RunInterpreter(UnitState<Debug>& state) {
-    const auto& uniforms = g_state.vs.uniforms;
-    const auto& swizzle_data = g_state.vs.swizzle_data;
-    const auto& program_code = g_state.vs.program_code;
+void RunInterpreter(const ShaderSetup& setup, UnitState<Debug>& state) {
+    const auto& uniforms = setup.uniforms;
+    const auto& swizzle_data = setup.swizzle_data;
+    const auto& program_code = setup.program_code;
 
     // Placeholder for invalid inputs
     static float24 dummy_vec4_float24[4];
+
+    // Reset stack
+    state.call_stack.clear();
 
     unsigned iteration = 0;
     bool exit_loop = false;
@@ -80,6 +84,8 @@ void RunInterpreter(UnitState<Debug>& state) {
                 return dummy_vec4_float24;
             }
         };
+
+//printf("Running 0x%03X\n", state.program_counter*4);
 
         switch (instr.opcode.Value().GetInfo().type) {
         case OpCode::Type::Arithmetic:
@@ -607,6 +613,16 @@ void RunInterpreter(UnitState<Debug>& state) {
                 break;
             }
 
+            case OpCode::Id::EMIT: {
+                Shader::HandleEMIT(state);
+                break;
+            }
+
+            case OpCode::Id::SETEMIT: {
+                state.registers.emit_params.raw = program_code[state.program_counter];
+                break;
+            }
+
             default:
                 LOG_ERROR(HW_GPU, "Unhandled instruction: 0x%02x (%s): 0x%08x",
                           (int)instr.opcode.Value().EffectiveOpCode(), instr.opcode.Value().GetInfo().name, instr.hex);
@@ -623,8 +639,8 @@ void RunInterpreter(UnitState<Debug>& state) {
 }
 
 // Explicit instantiation
-template void RunInterpreter(UnitState<false>& state);
-template void RunInterpreter(UnitState<true>& state);
+template void RunInterpreter(const ShaderSetup& setup, UnitState<false>& state);
+template void RunInterpreter(const ShaderSetup& setup, UnitState<true>& state);
 
 } // namespace
 

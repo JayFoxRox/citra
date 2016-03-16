@@ -30,7 +30,9 @@ public:
         PicaCommandProcessed,
         IncomingPrimitiveBatch,
         FinishedPrimitiveBatch,
-        VertexLoaded,
+        RunVS,
+        RunGS,
+        ShaderEmitInstruction,
         IncomingDisplayTransfer,
         GSPCommandProcessed,
         BufferSwapped,
@@ -167,6 +169,7 @@ class GeometryDumper {
 public:
     struct Vertex {
         std::array<float,3> pos;
+        std::array<float,3> normal;
     };
 
     void AddTriangle(Vertex& v0, Vertex& v1, Vertex& v2);

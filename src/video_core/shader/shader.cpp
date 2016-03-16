@@ -40,12 +40,13 @@ static void ClearCache() {
 }
 #endif // ARCHITECTURE_x86_64
 
-void Setup(UnitState<false>& state) {
+//FIXME: This should return a runnable shader object (= code and swizzle mask + entry point)
+void Setup(const Regs::ShaderConfig& config, const ShaderSetup& setup) {
 #ifdef ARCHITECTURE_x86_64
     if (VideoCore::g_shader_jit_enabled) {
-        u64 cache_key = (Common::ComputeHash64(&g_state.vs.program_code, sizeof(g_state.vs.program_code)) ^
-            Common::ComputeHash64(&g_state.vs.swizzle_data, sizeof(g_state.vs.swizzle_data)) ^
-            g_state.regs.vs.main_offset);
+        u64 cache_key = (Common::ComputeHash64(&setup.program_code, sizeof(setup.program_code)) ^
+            Common::ComputeHash64(&setup.swizzle_data, sizeof(setup.swizzle_data)) ^
+            config.main_offset);
 
         auto iter = shader_map.find(cache_key);
         if (iter != shader_map.end()) {
@@ -56,8 +57,7 @@ void Setup(UnitState<false>& state) {
                 // If not, clear the cache of all previously compiled shaders
                 ClearCache();
             }
-
-            jit_shader = jit.Compile();
+            jit_shader = jit.Compile(setup, config);
             shader_map.emplace(cache_key, jit_shader);
         }
     }
@@ -70,16 +70,53 @@ void Shutdown() {
 #endif // ARCHITECTURE_x86_64
 }
 
+template<bool Debug>
+void HandleEMIT(UnitState<Debug>& state) {
+
+    //FIXME: doesn't work as expected, no idea why?!
+    if (g_debug_context && !g_debug_context->at_breakpoint)
+        g_debug_context->OnEvent(DebugContext::Event::ShaderEmitInstruction, nullptr);
+
+    auto &emit_params = state.registers.emit_params;
+    auto &emit_buffer = state.registers.emit_buffer;
+
+    assert(emit_params.vertex_id < 3);
+
+    auto& buffer_data = emit_buffer[emit_params.vertex_id];
+    for(unsigned int i = 0; i < 16; i++) {
+        buffer_data[i] = state.registers.output[i];
+    }
+
+    if (emit_params.primitive_emit) {
+        ASSERT_MSG(state.emit_triangle_callback, "EMIT invoked but no handler set!");
+        OutputVertex v0 = GenerateOutputVertex(emit_buffer[0]);
+        OutputVertex v1 = GenerateOutputVertex(emit_buffer[1]);
+        OutputVertex v2 = GenerateOutputVertex(emit_buffer[2]);
+        //FIXME: What about v3?!
+        if (emit_params.winding) {
+          state.emit_triangle_callback(v2, v1, v0);
+        } else {
+          state.emit_triangle_callback(v0, v1, v2);
+        }
+    }
+
+}
+
+// Explicit instantiation
+template void HandleEMIT(UnitState<false>& state);
+template void HandleEMIT(UnitState<true>& state);
+
 static Common::Profiling::TimingCategory shader_category("Vertex Shader");
 MICROPROFILE_DEFINE(GPU_VertexShader, "GPU", "Vertex Shader", MP_RGB(50, 50, 240));
 
-OutputVertex Run(UnitState<false>& state, const InputVertex& input, int num_attributes) {
-    auto& config = g_state.regs.vs;
+void Run(const Regs::ShaderConfig& config, const ShaderSetup& setup, UnitState<false>& state, const InputVertex& input, int num_attributes) {
 
     Common::Profiling::ScopeTimer timer(shader_category);
-    MICROPROFILE_SCOPE(GPU_VertexShader);
+    MICROPROFILE_SCOPE(GPU_VertexShader); //FIXME!
 
+    //FIXME: Should be part of the interpreter
     state.program_counter = config.main_offset;
+
     state.debug.max_offset = 0;
     state.debug.max_opdesc_id = 0;
 
@@ -105,17 +142,25 @@ OutputVertex Run(UnitState<false>& state, const InputVertex& input, int num_attr
     if (num_attributes > 14) state.registers.input[attribute_register_map.attribute14_register] = input.attr[14];
     if (num_attributes > 15) state.registers.input[attribute_register_map.attribute15_register] = input.attr[15];
 
-    state.conditional_code[0] = false;
-    state.conditional_code[1] = false;
+bool jit = &state == &g_state.shader_unit[3];
 
 #ifdef ARCHITECTURE_x86_64
-    if (VideoCore::g_shader_jit_enabled)
-        jit_shader(&state.registers);
+    if (VideoCore::g_shader_jit_enabled && jit)
+        jit_shader(&setup.uniforms, &state);
     else
-        RunInterpreter(state);
+        RunInterpreter(setup, state);
 #else
-    RunInterpreter(state);
+    RunInterpreter(setup, state);
 #endif // ARCHITECTURE_x86_64
+
+    return;
+
+}
+
+
+//FIXME: Move to Pica or something? Not really related to command_processor but not really shader related either.
+//       Also it should be callable by the shader debugger
+OutputVertex GenerateOutputVertex(Math::Vec4<float24> (&output_registers)[16]) {
 
     // Setup output data
     OutputVertex ret;
@@ -139,9 +184,10 @@ OutputVertex Run(UnitState<false>& state, const InputVertex& input, int num_attr
 
         for (unsigned comp = 0; comp < 4; ++comp) {
             float24* out = ((float24*)&ret) + semantics[comp];
-            if (semantics[comp] != Regs::VSOutputAttributes::INVALID) {
-                *out = state.registers.output[i][comp];
+            if (semantics[comp] < Regs::VSOutputAttributes::INVALID) {
+                *out = output_registers[i][comp];
             } else {
+                ASSERT_MSG(semantics[comp] == Regs::VSOutputAttributes::INVALID, "Unknown semantics");
                 // Zero output so that attributes which aren't output won't have denormals in them,
                 // which would slow us down later.
                 memset(out, 0, sizeof(*out));
@@ -168,40 +214,52 @@ OutputVertex Run(UnitState<false>& state, const InputVertex& input, int num_attr
     return ret;
 }
 
-DebugData<true> ProduceDebugInfo(const InputVertex& input, int num_attributes, const Regs::ShaderConfig& config, const ShaderSetup& setup) {
-    UnitState<true> state;
 
-    state.program_counter = config.main_offset;
-    state.debug.max_offset = 0;
-    state.debug.max_opdesc_id = 0;
+DebugData<true> ProduceDebugInfo(const Regs::ShaderConfig& config, const ShaderSetup& setup, const UnitState<false>& state, const InputVertex& input, int num_attributes) {
+    UnitState<true> debug_state;
+
+    auto DoNothing = [](const Pica::Shader::OutputVertex& v0, const Pica::Shader::OutputVertex& v1, const Pica::Shader::OutputVertex& v2) {
+        // FIXME: This should probably set some label so it's indicated that new data was drawn?
+    };
+    debug_state.emit_triangle_callback = DoNothing;
+
+    debug_state.program_counter = config.main_offset;
+
+    debug_state.debug.max_offset = 0;
+    debug_state.debug.max_opdesc_id = 0;
+
+    // Load temporary registers
+    for (unsigned i = 0; i < 16; i++)
+        debug_state.registers.temporary[i] = state.registers.temporary[i];
+
+    // Load conditional state
+    debug_state.conditional_code[0] = state.conditional_code[0];
+    debug_state.conditional_code[1] = state.conditional_code[1];
 
     // Setup input register table
     const auto& attribute_register_map = config.input_register_map;
     float24 dummy_register;
-    boost::fill(state.registers.input, &dummy_register);
+    boost::fill(debug_state.registers.input, &dummy_register);
 
-    if (num_attributes > 0) state.registers.input[attribute_register_map.attribute0_register] = &input.attr[0].x;
-    if (num_attributes > 1) state.registers.input[attribute_register_map.attribute1_register] = &input.attr[1].x;
-    if (num_attributes > 2) state.registers.input[attribute_register_map.attribute2_register] = &input.attr[2].x;
-    if (num_attributes > 3) state.registers.input[attribute_register_map.attribute3_register] = &input.attr[3].x;
-    if (num_attributes > 4) state.registers.input[attribute_register_map.attribute4_register] = &input.attr[4].x;
-    if (num_attributes > 5) state.registers.input[attribute_register_map.attribute5_register] = &input.attr[5].x;
-    if (num_attributes > 6) state.registers.input[attribute_register_map.attribute6_register] = &input.attr[6].x;
-    if (num_attributes > 7) state.registers.input[attribute_register_map.attribute7_register] = &input.attr[7].x;
-    if (num_attributes > 8) state.registers.input[attribute_register_map.attribute8_register] = &input.attr[8].x;
-    if (num_attributes > 9) state.registers.input[attribute_register_map.attribute9_register] = &input.attr[9].x;
-    if (num_attributes > 10) state.registers.input[attribute_register_map.attribute10_register] = &input.attr[10].x;
-    if (num_attributes > 11) state.registers.input[attribute_register_map.attribute11_register] = &input.attr[11].x;
-    if (num_attributes > 12) state.registers.input[attribute_register_map.attribute12_register] = &input.attr[12].x;
-    if (num_attributes > 13) state.registers.input[attribute_register_map.attribute13_register] = &input.attr[13].x;
-    if (num_attributes > 14) state.registers.input[attribute_register_map.attribute14_register] = &input.attr[14].x;
-    if (num_attributes > 15) state.registers.input[attribute_register_map.attribute15_register] = &input.attr[15].x;
+    if (num_attributes > 0) debug_state.registers.input[attribute_register_map.attribute0_register] = &input.attr[0].x;
+    if (num_attributes > 1) debug_state.registers.input[attribute_register_map.attribute1_register] = &input.attr[1].x;
+    if (num_attributes > 2) debug_state.registers.input[attribute_register_map.attribute2_register] = &input.attr[2].x;
+    if (num_attributes > 3) debug_state.registers.input[attribute_register_map.attribute3_register] = &input.attr[3].x;
+    if (num_attributes > 4) debug_state.registers.input[attribute_register_map.attribute4_register] = &input.attr[4].x;
+    if (num_attributes > 5) debug_state.registers.input[attribute_register_map.attribute5_register] = &input.attr[5].x;
+    if (num_attributes > 6) debug_state.registers.input[attribute_register_map.attribute6_register] = &input.attr[6].x;
+    if (num_attributes > 7) debug_state.registers.input[attribute_register_map.attribute7_register] = &input.attr[7].x;
+    if (num_attributes > 8) debug_state.registers.input[attribute_register_map.attribute8_register] = &input.attr[8].x;
+    if (num_attributes > 9) debug_state.registers.input[attribute_register_map.attribute9_register] = &input.attr[9].x;
+    if (num_attributes > 10) debug_state.registers.input[attribute_register_map.attribute10_register] = &input.attr[10].x;
+    if (num_attributes > 11) debug_state.registers.input[attribute_register_map.attribute11_register] = &input.attr[11].x;
+    if (num_attributes > 12) debug_state.registers.input[attribute_register_map.attribute12_register] = &input.attr[12].x;
+    if (num_attributes > 13) debug_state.registers.input[attribute_register_map.attribute13_register] = &input.attr[13].x;
+    if (num_attributes > 14) debug_state.registers.input[attribute_register_map.attribute14_register] = &input.attr[14].x;
+    if (num_attributes > 15) debug_state.registers.input[attribute_register_map.attribute15_register] = &input.attr[15].x;
 
-    state.conditional_code[0] = false;
-    state.conditional_code[1] = false;
-
-    RunInterpreter(state);
-    return state.debug;
+    RunInterpreter(setup, debug_state);
+    return debug_state.debug;
 }
 
 } // namespace Shader

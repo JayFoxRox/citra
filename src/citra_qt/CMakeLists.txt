@@ -12,6 +12,7 @@ set(SRCS
             debugger/graphics_breakpoints.cpp
             debugger/graphics_cmdlists.cpp
             debugger/graphics_framebuffer.cpp
+            debugger/graphics_geometry_shader.cpp
             debugger/graphics_tracing.cpp
             debugger/graphics_vertex_shader.cpp
             debugger/profiler.cpp

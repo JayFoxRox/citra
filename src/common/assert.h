@@ -6,6 +6,7 @@
 
 #include <cstdlib>
 
+#include "common/assert.h"
 #include "common/common_funcs.h"
 #include "common/logging/log.h"
 

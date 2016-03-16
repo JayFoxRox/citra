@@ -64,8 +64,8 @@ const JitFunction instr_table[64] = {
     &JitCompiler::Compile_IF,       // ifu
     &JitCompiler::Compile_IF,       // ifc
     &JitCompiler::Compile_LOOP,     // loop
-    nullptr,                        // emit
-    nullptr,                        // sete
+    &JitCompiler::Compile_EMIT,     // emit
+    &JitCompiler::Compile_SETEMIT,  // setemit
     &JitCompiler::Compile_JMP,      // jmpc
     &JitCompiler::Compile_JMP,      // jmpu
     &JitCompiler::Compile_CMP,      // cmp
@@ -108,7 +108,7 @@ static const X64Reg COND0 = R13;
 /// Result of the previous CMP instruction for the Y-component comparison
 static const X64Reg COND1 = R14;
 /// Pointer to the UnitState instance for the current VS unit
-static const X64Reg REGISTERS = R15;
+static const X64Reg STATE = R15;
 /// SIMD scratch register
 static const X64Reg SCRATCH = XMM0;
 /// Loaded with the first swizzled source register, otherwise can be used as a scratch register
@@ -127,7 +127,7 @@ static const X64Reg NEGBIT = XMM15;
 // State registers that must not be modified by external functions calls
 // Scratch registers, e.g., SRC1 and SCRATCH, have to be saved on the side if needed
 static const BitSet32 persistent_regs = {
-    UNIFORMS, REGISTERS, // Pointers to register blocks
+    UNIFORMS, STATE, // Pointers to environment
     ADDROFFS_REG_0, ADDROFFS_REG_1, LOOPCOUNT_REG, COND0, COND1, // Cached registers
     ONE+16, NEGBIT+16, // Constants
 };
@@ -150,9 +150,9 @@ void JitCompiler::Compile_SwizzleSrc(Instruction instr, unsigned src_num, Source
 
     if (src_reg.GetRegisterType() == RegisterType::FloatUniform) {
         src_ptr = UNIFORMS;
-        src_offset = src_reg.GetIndex() * sizeof(float24) * 4;
+        src_offset = ShaderSetup::FloatBaseOffset() + src_reg.GetIndex() << 4;
     } else {
-        src_ptr = REGISTERS;
+        src_ptr = STATE;
         src_offset = UnitState<false>::InputOffset(src_reg);
     }
 
@@ -197,7 +197,7 @@ void JitCompiler::Compile_SwizzleSrc(Instruction instr, unsigned src_num, Source
         MOVAPS(dest, MDisp(src_ptr, src_offset_disp));
     }
 
-    SwizzlePattern swiz = { g_state.vs.swizzle_data[operand_desc_id] };
+    SwizzlePattern swiz = { setup->swizzle_data[operand_desc_id] };
 
     // Generate instructions for source register swizzling as needed
     u8 sel = swiz.GetRawSelector(src_num);
@@ -228,7 +228,7 @@ void JitCompiler::Compile_DestEnable(Instruction instr,X64Reg src) {
         dest = instr.common.dest.Value();
     }
 
-    SwizzlePattern swiz = { g_state.vs.swizzle_data[operand_desc_id] };
+    SwizzlePattern swiz = { setup->swizzle_data[operand_desc_id] };
 
     int dest_offset_disp = (int)UnitState<false>::OutputOffset(dest);
     ASSERT_MSG(dest_offset_disp == UnitState<false>::OutputOffset(dest), "Destinaton offset too large for int type");
@@ -236,11 +236,11 @@ void JitCompiler::Compile_DestEnable(Instruction instr,X64Reg src) {
     // If all components are enabled, write the result to the destination register
     if (swiz.dest_mask == NO_DEST_REG_MASK) {
         // Store dest back to memory
-        MOVAPS(MDisp(REGISTERS, dest_offset_disp), src);
+        MOVAPS(MDisp(STATE, dest_offset_disp), src);
 
     } else {
         // Not all components are enabled, so mask the result when storing to the destination register...
-        MOVAPS(SCRATCH, MDisp(REGISTERS, dest_offset_disp));
+        MOVAPS(SCRATCH, MDisp(STATE, dest_offset_disp));
 
         if (Common::GetCPUCaps().sse4_1) {
             u8 mask = ((swiz.dest_mask & 1) << 3) | ((swiz.dest_mask & 8) >> 3) | ((swiz.dest_mask & 2) << 1) | ((swiz.dest_mask & 4) >> 1);
@@ -259,7 +259,7 @@ void JitCompiler::Compile_DestEnable(Instruction instr,X64Reg src) {
         }
 
         // Store dest back to memory
-        MOVAPS(MDisp(REGISTERS, dest_offset_disp), SCRATCH);
+        MOVAPS(MDisp(STATE, dest_offset_disp), SCRATCH);
     }
 }
 
@@ -308,7 +308,7 @@ void JitCompiler::Compile_EvaluateCondition(Instruction instr) {
 }
 
 void JitCompiler::Compile_UniformCondition(Instruction instr) {
-    int offset = offsetof(decltype(g_state.vs.uniforms), b) + (instr.flow_control.bool_uniform_id * sizeof(bool));
+    int offset = ShaderSetup::BoolOffset(instr.flow_control.bool_uniform_id);
     CMP(sizeof(bool) * 8, MDisp(UNIFORMS, offset), Imm8(0));
 }
 
@@ -393,9 +393,9 @@ void JitCompiler::Compile_DPH(Instruction instr) {
 
 void JitCompiler::Compile_EX2(Instruction instr) {
     Compile_SwizzleSrc(instr, 1, instr.common.src1, SRC1);
-    MOVSS(XMM0, R(SRC1));
 
     ABI_PushRegistersAndAdjustStack(PersistentCallerSavedRegs(), 0);
+    MOVSS(XMM0, R(SRC1));
     ABI_CallFunction(reinterpret_cast<const void*>(exp2f));
     ABI_PopRegistersAndAdjustStack(PersistentCallerSavedRegs(), 0);
 
@@ -406,9 +406,9 @@ void JitCompiler::Compile_EX2(Instruction instr) {
 
 void JitCompiler::Compile_LG2(Instruction instr) {
     Compile_SwizzleSrc(instr, 1, instr.common.src1, SRC1);
-    MOVSS(XMM0, R(SRC1));
 
     ABI_PushRegistersAndAdjustStack(PersistentCallerSavedRegs(), 0);
+    MOVSS(XMM0, R(SRC1));
     ABI_CallFunction(reinterpret_cast<const void*>(log2f));
     ABI_PopRegistersAndAdjustStack(PersistentCallerSavedRegs(), 0);
 
@@ -484,7 +484,7 @@ void JitCompiler::Compile_MIN(Instruction instr) {
 }
 
 void JitCompiler::Compile_MOVA(Instruction instr) {
-    SwizzlePattern swiz = { g_state.vs.swizzle_data[instr.common.operand_desc_id] };
+    SwizzlePattern swiz = { setup->swizzle_data[instr.common.operand_desc_id] };
 
     if (!swiz.DestComponentEnabled(0) && !swiz.DestComponentEnabled(1)) {
         return; // NoOp
@@ -683,7 +683,7 @@ void JitCompiler::Compile_LOOP(Instruction instr) {
 
     looping = true;
 
-    int offset = offsetof(decltype(g_state.vs.uniforms), i) + (instr.flow_control.int_uniform_id * sizeof(Math::Vec4<u8>));
+    int offset = ShaderSetup::IntOffset(instr.flow_control.int_uniform_id);
     MOV(32, R(LOOPCOUNT), MDisp(UNIFORMS, offset));
     MOV(32, R(LOOPCOUNT_REG), R(LOOPCOUNT));
     SHR(32, R(LOOPCOUNT_REG), Imm8(8));
@@ -703,6 +703,22 @@ void JitCompiler::Compile_LOOP(Instruction instr) {
     J_CC(CC_NZ, loop_start); // Loop if not equal
 
     looping = false;
+}
+
+static void Handle_EMIT(void* param1) {
+    UnitState<false>& state = *static_cast<UnitState<false>*>(param1);
+    Shader::HandleEMIT(state);
+};
+
+void JitCompiler::Compile_EMIT(Instruction instr) {
+    ABI_PushRegistersAndAdjustStack(PersistentCallerSavedRegs(), 0);
+    MOV(PTRBITS, R(ABI_PARAM1), R(STATE));
+    ABI_CallFunctionR(reinterpret_cast<const void*>(Handle_EMIT), ABI_PARAM1);
+    ABI_PopRegistersAndAdjustStack(PersistentCallerSavedRegs(), 0);
+}
+
+void JitCompiler::Compile_SETEMIT(Instruction instr) {
+    MOV(32, MDisp(STATE, UnitState<false>::EmitParamsOffset()), Imm32(*(u32*)&instr.setemit));
 }
 
 void JitCompiler::Compile_JMP(Instruction instr) {
@@ -741,7 +757,7 @@ void JitCompiler::Compile_Block(unsigned end) {
 void JitCompiler::Compile_NextInstr(unsigned* offset) {
     offset_ptr = offset;
 
-    Instruction instr = *(Instruction*)&g_state.vs.program_code[(*offset_ptr)++];
+    Instruction instr = *(Instruction*)&setup->program_code[(*offset_ptr)++];
     OpCode::Id opcode = instr.opcode.Value();
     auto instr_func = instr_table[static_cast<unsigned>(opcode)];
 
@@ -755,15 +771,18 @@ void JitCompiler::Compile_NextInstr(unsigned* offset) {
     }
 }
 
-CompiledShader* JitCompiler::Compile() {
-    const u8* start = GetCodePtr();
-    unsigned offset = g_state.regs.vs.main_offset;
+CompiledShader* JitCompiler::Compile(const ShaderSetup& setup, const Regs::ShaderConfig& config) {
+    auto start = GetCodePtr();
+    unsigned offset = config.main_offset;
+
+    // Only needed at compile time
+    this->setup = &setup;
 
     // The stack pointer is 8 modulo 16 at the entry of a procedure
     ABI_PushRegistersAndAdjustStack(ABI_ALL_CALLEE_SAVED, 8);
 
-    MOV(PTRBITS, R(REGISTERS), R(ABI_PARAM1));
-    MOV(PTRBITS, R(UNIFORMS), ImmPtr(&g_state.vs.uniforms));
+    MOV(PTRBITS, R(UNIFORMS), R(ABI_PARAM1));
+    MOV(PTRBITS, R(STATE), R(ABI_PARAM2));
 
     // Zero address/loop  registers
     XOR(64, R(ADDROFFS_REG_0), R(ADDROFFS_REG_0));
@@ -782,9 +801,12 @@ CompiledShader* JitCompiler::Compile() {
 
     looping = false;
 
-    while (offset < g_state.vs.program_code.size()) {
+    while (offset < this->setup->program_code.size()) {
         Compile_NextInstr(&offset);
     }
+
+    // We don't need this anymore
+    this->setup = nullptr;
 
     return (CompiledShader*)start;
 }
