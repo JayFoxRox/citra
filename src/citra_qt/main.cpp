@@ -88,7 +88,7 @@ GMainWindow::GMainWindow() : emu_thread(nullptr)
     addDockWidget(Qt::RightDockWidgetArea, graphicsWidget);
     graphicsWidget ->hide();
 
-    graphicsCommandsWidget = new GPUCommandListWidget(this);
+    auto graphicsCommandsWidget = new GPUCommandListWidget(Pica::g_debug_context, this);
     addDockWidget(Qt::RightDockWidgetArea, graphicsCommandsWidget);
     graphicsCommandsWidget->hide();
 
