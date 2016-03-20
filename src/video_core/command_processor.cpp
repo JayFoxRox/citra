@@ -131,14 +131,17 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
 
                     immediate_input.attr[immediate_attribute_id++] = attribute;
 
-                    if (immediate_attribute_id >= attribute_config.GetNumTotalAttributes()) {
+                    if (immediate_attribute_id >= g_state.regs.vs.GetNumTotalAttributes()) {
                         immediate_attribute_id = 0;
 
                         Shader::UnitState<false> shader_unit;
                         Shader::Setup(shader_unit);
 
+                        if (g_debug_context)
+                            g_debug_context->OnEvent(DebugContext::Event::VertexLoaded, (void*)&immediate_input);
+
                         // Send to vertex shader
-                        Shader::OutputVertex output = Shader::Run(shader_unit, immediate_input, attribute_config.GetNumTotalAttributes());
+                        Shader::OutputVertex output = Shader::Run(shader_unit, immediate_input, g_state.regs.vs.GetNumTotalAttributes());
 
                         // Send to renderer
                         using Pica::Shader::OutputVertex;

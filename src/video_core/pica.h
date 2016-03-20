@@ -985,6 +985,7 @@ struct Regs {
             return (id >= 12) || (attribute_mask & (1ULL << id)) != 0;
         }
 
+        // The number of attributes loaded from the vertex buffer
         inline int GetNumTotalAttributes() const {
             return (int)num_extra_attributes+1;
         }
@@ -1123,7 +1124,17 @@ struct Regs {
             BitField<24, 8, u32> w;
         } int_uniforms[4];
 
-        INSERT_PADDING_WORDS(0x5);
+        INSERT_PADDING_WORDS(0x4);
+
+        union {
+            BitField<0, 4, u32> input_vertex_attributes;
+            //TODO: Geometry Shader fields
+        };
+
+        // Number of fixed attributes + loaded from vertex buffer (or immediate buffer) ?
+        inline int GetNumTotalAttributes() const {
+            return (int)input_vertex_attributes+1;
+        }
 
         // Offset to shader program entry point (in words)
         BitField<0, 16, u32> main_offset;
@@ -1292,6 +1303,7 @@ ASSERT_REG_POSITION(triangle_topology, 0x25e);
 ASSERT_REG_POSITION(restart_primitive, 0x25f);
 ASSERT_REG_POSITION(gs, 0x280);
 ASSERT_REG_POSITION(vs, 0x2b0);
+ASSERT_REG_POSITION(vs.input_vertex_attributes, 0x2b9);
 
 #undef ASSERT_REG_POSITION
 #endif // !defined(_MSC_VER)
