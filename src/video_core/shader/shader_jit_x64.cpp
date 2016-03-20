@@ -577,7 +577,7 @@ void JitCompiler::Compile_END(Instruction instr) {
 void JitCompiler::Compile_CALL(Instruction instr) {
     // Need to advance the return address past the proceeding instructions, this is the number of bytes to skip
     constexpr unsigned SKIP = 21;
-    const uintptr_t start = reinterpret_cast<uintptr_t>(GetCodePtr());
+    const ptrdiff_t start = reinterpret_cast<ptrdiff_t>(GetCodePtr());
 
     // Push return address - not using CALL because we also want to push the offset of the return before jumping
     MOV(64, R(RAX), ImmPtr(GetCodePtr() + SKIP));
@@ -591,7 +591,7 @@ void JitCompiler::Compile_CALL(Instruction instr) {
     fixup_branches.push_back({ b, instr.flow_control.dest_offset });
 
     // Make sure that if the above code changes, SKIP gets updated
-    ASSERT(reinterpret_cast<uintptr_t>(GetCodePtr()) - start == SKIP);
+    ASSERT(reinterpret_cast<ptrdiff_t>(GetCodePtr()) - start == SKIP);
 }
 
 void JitCompiler::Compile_CALLC(Instruction instr) {
@@ -805,8 +805,8 @@ void JitCompiler::FindReturnOffsets() {
     }
 }
 
-CompiledShader* JitCompiler::Compile() {
-    const u8* start = GetCodePtr();
+void JitCompiler::Compile() {
+    program = (CompiledShader*)GetCodePtr();
 
     // The stack pointer is 8 modulo 16 at the entry of a procedure
     ABI_PushRegistersAndAdjustStack(ABI_ALL_CALLEE_SAVED, 8);
@@ -852,15 +852,13 @@ CompiledShader* JitCompiler::Compile() {
         SetJumpTarget(branch.first, code_ptr[branch.second]);
     }
 
-    return (CompiledShader*)start;
+    ptrdiff_t size = reinterpret_cast<ptrdiff_t>(GetCodePtr()) - reinterpret_cast<ptrdiff_t>(program);
+    ASSERT(size <= MAX_SHADER_SIZE);
+    LOG_INFO(HW_GPU, "Compiled shader size=%d", size);
 }
 
 JitCompiler::JitCompiler() {
-    AllocCodeSpace(jit_cache_size);
-}
-
-void JitCompiler::Clear() {
-    ClearCodeSpace();
+    AllocCodeSpace(MAX_SHADER_SIZE);
 }
 
 } // namespace Shader
