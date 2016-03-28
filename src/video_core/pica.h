@@ -591,7 +591,25 @@ struct Regs {
     }
 
     struct {
-        INSERT_PADDING_WORDS(0x6);
+        INSERT_PADDING_WORDS(0x2);
+
+        union {
+            BitField<0, 4, u32> allow_color_read; // Allow read (0 = disable, 0xF = enable)
+        };
+
+        union {
+            BitField<0, 4, u32> allow_color_write; // Allow write (0 = disable, 0xF = enable)
+        };
+
+        union {
+            BitField<0, 1, u32> allow_stencil_read; // Allow stencil read (0 = disable, 1 = enable)
+            BitField<1, 1, u32> allow_depth_read; // Allow depth read (0 = disable, 1 = enable)
+        };
+
+        union {
+            BitField<0, 1, u32> allow_stencil_write; // Allow stencil write (0 = disable, 1 = enable)
+            BitField<1, 1, u32> allow_depth_write; // Allow depth write (0 = disable, 1 = enable)
+        };
 
         DepthFormat depth_format; // TODO: Should be a BitField!
         BitField<16, 3, ColorFormat> color_format;

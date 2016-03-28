@@ -809,11 +809,12 @@ static void ProcessTriangleInternal(const Shader::OutputVertex& v0,
 
             auto UpdateStencil = [stencil_test, x, y, &old_stencil](Pica::Regs::StencilAction action) {
                 u8 new_stencil = PerformStencilAction(action, old_stencil, stencil_test.reference_value);
-                SetStencil(x >> 4, y >> 4, (new_stencil & stencil_test.write_mask) | (old_stencil & ~stencil_test.write_mask));
+                if (g_state.regs.framebuffer.allow_stencil_write)
+                    SetStencil(x >> 4, y >> 4, (new_stencil & stencil_test.write_mask) | (old_stencil & ~stencil_test.write_mask));
             };
 
             if (stencil_action_enable) {
-                old_stencil = GetStencil(x >> 4, y >> 4);
+                old_stencil = regs.framebuffer.allow_stencil_read ? GetStencil(x >> 4, y >> 4) : 0;
                 u8 dest = old_stencil & stencil_test.input_mask;
                 u8 ref = stencil_test.reference_value & stencil_test.input_mask;
 
@@ -885,7 +886,7 @@ static void ProcessTriangleInternal(const Shader::OutputVertex& v0,
             u32 z = (u32)(depth * ((1 << num_bits) - 1));
 
             if (output_merger.depth_test_enable) {
-                u32 ref_z = GetDepth(x >> 4, y >> 4);
+                u32 ref_z = regs.framebuffer.allow_depth_read ? GetDepth(x >> 4, y >> 4) : 0;
 
                 bool pass = false;
 
@@ -930,14 +931,14 @@ static void ProcessTriangleInternal(const Shader::OutputVertex& v0,
                 }
             }
 
-            if (output_merger.depth_write_enable)
+            if (regs.framebuffer.allow_depth_write && output_merger.depth_write_enable)
                 SetDepth(x >> 4, y >> 4, z);
 
             // The stencil depth_pass action is executed even if depth testing is disabled
             if (stencil_action_enable)
                 UpdateStencil(stencil_test.action_depth_pass);
 
-            auto dest = GetPixel(x >> 4, y >> 4);
+            auto dest = regs.framebuffer.allow_color_read != 0x0 ? GetPixel(x >> 4, y >> 4) : Math::Vec4<u8>(0,0,0,0);
             Math::Vec4<u8> blend_output = combiner_output;
 
             if (output_merger.alphablend_enable) {
@@ -1155,7 +1156,8 @@ static void ProcessTriangleInternal(const Shader::OutputVertex& v0,
                 output_merger.alpha_enable ? blend_output.a() : dest.a()
             };
 
-            DrawPixel(x >> 4, y >> 4, result);
+            if (regs.framebuffer.allow_color_write != 0x0)
+                DrawPixel(x >> 4, y >> 4, result);
         }
     }
 }
