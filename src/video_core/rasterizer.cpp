@@ -963,7 +963,7 @@ static void ProcessTriangleInternal(const Shader::OutputVertex& v0, const Shader
             };
 
             if (stencil_action_enable) {
-                old_stencil = GetStencil(x >> 4, y >> 4);
+                old_stencil = (regs.framebuffer.allow_depth_stencil_read != 0) ? GetStencil(x >> 4, y >> 4) : 0;
                 u8 dest = old_stencil & stencil_test.input_mask;
                 u8 ref = stencil_test.reference_value & stencil_test.input_mask;
 
@@ -1013,7 +1013,7 @@ static void ProcessTriangleInternal(const Shader::OutputVertex& v0, const Shader
             u32 z = (u32)(depth * ((1 << num_bits) - 1));
 
             if (output_merger.depth_test_enable) {
-                u32 ref_z = GetDepth(x >> 4, y >> 4);
+                u32 ref_z = (regs.framebuffer.allow_depth_stencil_read != 0) ? GetDepth(x >> 4, y >> 4) : 0;
 
                 bool pass = false;
 
@@ -1065,7 +1065,7 @@ static void ProcessTriangleInternal(const Shader::OutputVertex& v0, const Shader
             if (stencil_action_enable)
                 UpdateStencil(stencil_test.action_depth_pass);
 
-            auto dest = GetPixel(x >> 4, y >> 4);
+            auto dest = (regs.framebuffer.allow_color_read != 0) ? GetPixel(x >> 4, y >> 4) : Math::Vec4<u8>(0,0,0,0);
             Math::Vec4<u8> blend_output = combiner_output;
 
             if (output_merger.alphablend_enable) {
