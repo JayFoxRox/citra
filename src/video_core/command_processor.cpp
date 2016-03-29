@@ -21,7 +21,7 @@
 #include "video_core/renderer_base.h"
 #include "video_core/video_core.h"
 #include "video_core/debug_utils/debug_utils.h"
-#include "video_core/shader/shader_interpreter.h"
+#include "video_core/shader/shader.h"
 
 namespace Pica {
 
@@ -131,22 +131,24 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
                     // When all specified immediate attributes are present, the Vertex Shader is invoked and everything is
                     // sent to the primitive assembler.
 
-                    auto& immediate_input = g_state.immediate.input_vertex;
+                    auto& immediate_input = g_state.immediate.input_registers;
                     auto& immediate_attribute_id = g_state.immediate.current_attribute;
 
-                    immediate_input.attr[immediate_attribute_id++] = attribute;
+                    immediate_input.registers[immediate_attribute_id++] = attribute;
 
                     if (immediate_attribute_id >= regs.vs.num_input_attributes+1) {
                         immediate_attribute_id = 0;
 
-                        Shader::UnitState<false> shader_unit;
-                        Shader::Setup(shader_unit);
+                        Shader::UnitState shader_unit;
+                        Shader::RunnableShader<false>& vertex_shader = Shader::Setup(shader_unit, g_state.regs.vs, g_state.vs);
 
                         if (g_debug_context)
                             g_debug_context->OnEvent(DebugContext::Event::VertexLoaded, static_cast<void*>(&immediate_input));
 
                         // Send to vertex shader
-                        Shader::OutputVertex output = Shader::Run(shader_unit, immediate_input, regs.vs.num_input_attributes+1);
+                        Shader::OutputRegisters output_registers;
+                        vertex_shader.Run(regs.vs.main_offset, shader_unit, immediate_input, output_registers);
+                        Shader::OutputVertex output_vertex = Shader::OutputRegistersToVertex(output_registers);
 
                         // Send to renderer
                         using Pica::Shader::OutputVertex;
@@ -154,7 +156,7 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
                             VideoCore::g_renderer->Rasterizer()->AddTriangle(v0, v1, v2);
                         };
 
-                        g_state.primitive_assembler.SubmitVertex(output, AddTriangle);
+                        g_state.primitive_assembler.SubmitVertex(output_vertex, AddTriangle);
                     }
                 }
             }
@@ -303,8 +305,8 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
             unsigned int vertex_cache_pos = 0;
             vertex_cache_ids.fill(-1);
 
-            Shader::UnitState<false> shader_unit;
-            Shader::Setup(shader_unit);
+            Shader::UnitState shader_unit;
+            Shader::RunnableShader<false>& vertex_shader = Shader::Setup(shader_unit, g_state.regs.vs, g_state.vs);
 
             for (unsigned int index = 0; index < regs.num_vertices; ++index)
             {
@@ -316,7 +318,7 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
                 ASSERT(vertex != -1);
 
                 bool vertex_cache_hit = false;
-                Shader::OutputVertex output;
+                Shader::OutputVertex output_vertex;
 
                 if (is_indexed) {
                     if (g_debug_context && Pica::g_debug_context->recorder) {
@@ -326,7 +328,7 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
 
                     for (unsigned int i = 0; i < VERTEX_CACHE_SIZE; ++i) {
                         if (vertex == vertex_cache_ids[i]) {
-                            output = vertex_cache[i];
+                            output_vertex = vertex_cache[i];
                             vertex_cache_hit = true;
                             break;
                         }
@@ -335,16 +337,23 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
 
                 if (!vertex_cache_hit) {
                     // Initialize data for the current vertex
-                    Shader::InputVertex input;
+                    Shader::InputRegisters input;
+
+                    const auto& attribute_register_map = regs.vs.input_register_map;
 
                     for (int i = 0; i < attribute_config.GetNumTotalAttributes(); ++i) {
+
+                        // Reference to attribute which will be loaded
+                        auto& input_register = input.registers[attribute_register_map.GetRegisterForAttribute(i)];
+
                         if (vertex_attribute_elements[i] != 0) {
+
                             // Default attribute values set if array elements have < 4 components. This
                             // is *not* carried over from the default attribute settings even if they're
                             // enabled for this attribute.
                             static const float24 zero = float24::FromFloat32(0.0f);
                             static const float24 one = float24::FromFloat32(1.0f);
-                            input.attr[i] = Math::Vec4<float24>(zero, zero, zero, one);
+                            input_register = Math::Vec4<float24>(zero, zero, zero, one);
 
                             // Load per-vertex data from the loader arrays
                             for (unsigned int comp = 0; comp < vertex_attribute_elements[i]; ++comp) {
@@ -363,21 +372,21 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
                                     (vertex_attribute_formats[i] == Regs::VertexAttributeFormat::SHORT) ? *reinterpret_cast<const s16*>(srcdata) :
                                     *reinterpret_cast<const float*>(srcdata);
 
-                                input.attr[i][comp] = float24::FromFloat32(srcval);
+                                input_register[comp] = float24::FromFloat32(srcval);
                                 LOG_TRACE(HW_GPU, "Loaded component %x of attribute %x for vertex %x (index %x) from 0x%08x + 0x%08x + 0x%04x: %f",
                                     comp, i, vertex, index,
                                     attribute_config.GetPhysicalBaseAddress(),
                                     vertex_attribute_sources[i] - base_address,
                                     vertex_attribute_strides[i] * vertex + comp * vertex_attribute_element_size[i],
-                                    input.attr[i][comp].ToFloat32());
+                                    input_register[comp].ToFloat32());
                             }
                         } else if (attribute_config.IsDefaultAttribute(i)) {
                             // Load the default attribute if we're configured to do so
-                            input.attr[i] = g_state.vs.default_attributes[i];
+                            input_register = g_state.vs.default_attributes[i];
                             LOG_TRACE(HW_GPU, "Loaded default attribute %x for vertex %x (index %x): (%f, %f, %f, %f)",
                                       i, vertex, index,
-                                      input.attr[i][0].ToFloat32(), input.attr[i][1].ToFloat32(),
-                                      input.attr[i][2].ToFloat32(), input.attr[i][3].ToFloat32());
+                                      input_register[0].ToFloat32(), input_register[1].ToFloat32(),
+                                      input_register[2].ToFloat32(), input_register[3].ToFloat32());
                         } else {
                             // TODO(yuriks): In this case, no data gets loaded and the vertex
                             // remains with the last value it had. This isn't currently maintained
@@ -392,7 +401,7 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
                     // NOTE: When dumping geometry, we simply assume that the first input attribute
                     //       corresponds to the position for now.
                     DebugUtils::GeometryDumper::Vertex dumped_vertex = {
-                        input.attr[0][0].ToFloat32(), input.attr[0][1].ToFloat32(), input.attr[0][2].ToFloat32()
+                        input.registers[0][0].ToFloat32(), input.registers[0][1].ToFloat32(), input.registers[0][2].ToFloat32()
                     };
                     using namespace std::placeholders;
                     dumping_primitive_assembler.SubmitVertex(dumped_vertex,
@@ -400,10 +409,12 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
                                                                        &geometry_dumper, _1, _2, _3));
 #endif
                     // Send to vertex shader
-                    output = Shader::Run(shader_unit, input, attribute_config.GetNumTotalAttributes());
+                    Shader::OutputRegisters output_registers;
+                    vertex_shader.Run(regs.vs.main_offset, shader_unit, input, output_registers);
+                    output_vertex = Shader::OutputRegistersToVertex(output_registers);
 
                     if (is_indexed) {
-                        vertex_cache[vertex_cache_pos] = output;
+                        vertex_cache[vertex_cache_pos] = output_vertex;
                         vertex_cache_ids[vertex_cache_pos] = vertex;
                         vertex_cache_pos = (vertex_cache_pos + 1) % VERTEX_CACHE_SIZE;
                     }
@@ -416,7 +427,7 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
                     VideoCore::g_renderer->Rasterizer()->AddTriangle(v0, v1, v2);
                 };
 
-                primitive_assembler.SubmitVertex(output, AddTriangle);
+                primitive_assembler.SubmitVertex(output_vertex, AddTriangle);
             }
 
             for (auto& range : memory_accesses.ranges) {

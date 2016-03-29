@@ -24,8 +24,12 @@ namespace Pica {
 
 namespace Shader {
 
-struct InputVertex {
-    Math::Vec4<float24> attr[16];
+struct InputRegisters {
+    alignas(16) Math::Vec4<float24> registers[16];
+};
+
+struct OutputRegisters {
+    alignas(16) Math::Vec4<float24> registers[16];
 };
 
 struct OutputVertex {
@@ -264,20 +268,16 @@ inline void Record(DebugData<true>& debug_data, u32 offset, ValueType value) {
    debug_data.records[offset].mask |= type;
 }
 
-
 /**
  * This structure contains the state information that needs to be unique for a shader unit. The 3DS
  * has four shader units that process shaders in parallel. At the present, Citra only implements a
  * single shader unit that processes all shaders serially. Putting the state information in a struct
  * here will make it easier for us to parallelize the shader processing later.
  */
-template<bool Debug>
 struct UnitState {
     struct Registers {
         // The registers are accessed by the shader JIT using SSE instructions, and are therefore
         // required to be 16-byte aligned.
-        alignas(16) Math::Vec4<float24> input[16];
-        alignas(16) Math::Vec4<float24> output[16];
         alignas(16) Math::Vec4<float24> temporary[16];
     } registers;
     static_assert(std::is_pod<Registers>::value, "Structure is not POD");
@@ -305,8 +305,11 @@ struct UnitState {
     // TODO: Is there a maximal size for this?
     boost::container::static_vector<CallStackElement, 16> call_stack;
 
-    DebugData<Debug> debug;
+    static size_t InputOffset(const SourceRegister& reg) { return 0; }
+    static size_t OutputOffset(const DestRegister& reg) { return 0; }
 
+#if 0
+//FIXME!!! REMOVE!!!
     static size_t InputOffset(const SourceRegister& reg) {
         switch (reg.GetRegisterType()) {
         case RegisterType::Input:
@@ -334,36 +337,52 @@ struct UnitState {
             return 0;
         }
     }
+#endif
+
 };
 
+template<bool Debug>
+class RunnableShader {
+
+//FIXME: how to make functions virtual?!
+
+public:
+    /// Compiles a shader
+    virtual void Compile() = 0;
+
+    /**
+     * Runs the currently setup shader
+     * @param offset Shader entry point
+     * @param state Shader unit state, must be setup per shader and per shader unit
+     * @param input Input vertex into the shader
+     * @param output Output vertex from the shader
+     * @return Debug data for debug shaders
+     */
+    virtual DebugData<Debug> Run(unsigned int offset, UnitState& state, const InputRegisters& input, OutputRegisters& output) = 0;
+
+    std::array<u32, 1024> program_code;
+    std::array<u32, 1024> swizzle_data;
+
+};
+
+OutputVertex OutputRegistersToVertex(OutputRegisters& registers);
+InputRegisters BufferToInputRegisters(void* buffer);
+
 /**
- * Performs any shader unit setup that only needs to happen once per shader (as opposed to once per
+ * Finds a new shader object and creates a new one if necessary
  * vertex, which would happen within the `Run` function).
  * @param state Shader unit state, must be setup per shader and per shader unit
+ * @param config Configuration object for the shader pipeline
+ * @param setup Setup object for the shader pipeline
  */
-void Setup(UnitState<false>& state);
+template<bool Debug = false>
+RunnableShader<Debug>& Setup(UnitState& state, const Regs::ShaderConfig& config, const ShaderSetup& setup);
+
+//template RunnableShader<false>& Setup(UnitState& state, const Regs::ShaderConfig& config, const ShaderSetup& setup);
+//template RunnableShader<true>& Setup(UnitState& state, const Regs::ShaderConfig& config, const ShaderSetup& setup);
 
 /// Performs any cleanup when the emulator is shutdown
 void Shutdown();
-
-/**
- * Runs the currently setup shader
- * @param state Shader unit state, must be setup per shader and per shader unit
- * @param input Input vertex into the shader
- * @param num_attributes The number of vertex shader attributes
- * @return The output vertex, after having been processed by the vertex shader
- */
-OutputVertex Run(UnitState<false>& state, const InputVertex& input, int num_attributes);
-
-/**
- * Produce debug information based on the given shader and input vertex
- * @param input Input vertex into the shader
- * @param num_attributes The number of vertex shader attributes
- * @param config Configuration object for the shader pipeline
- * @param setup Setup object for the shader pipeline
- * @return Debug information for this shader with regards to the given vertex
- */
-DebugData<true> ProduceDebugInfo(const InputVertex& input, int num_attributes, const Regs::ShaderConfig& config, const ShaderSetup& setup);
 
 } // namespace Shader
 

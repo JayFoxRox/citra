@@ -11,7 +11,14 @@ namespace Pica {
 namespace Shader {
 
 template<bool Debug>
-void RunInterpreter(UnitState<Debug>& state);
+class RunnableInterpreterShader : public RunnableShader<Debug> {
+
+public:
+
+    void Compile();
+    DebugData<Debug> Run(unsigned int offset, UnitState& state, const InputRegisters& input, OutputRegisters& output);
+
+};
 
 } // namespace
 

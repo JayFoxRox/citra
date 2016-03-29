@@ -49,7 +49,7 @@ struct State {
     /// Struct used to describe immediate mode rendering state
     struct ImmediateModeState {
         // Used to buffer partial vertices for immediate-mode rendering.
-        Shader::InputVertex input_vertex;
+        Shader::InputRegisters input_registers;
         // Index of the next attribute to be loaded into `input_vertex`.
         int current_attribute = 0;
     } immediate;

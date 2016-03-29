@@ -22,10 +22,19 @@ namespace Pica {
 namespace Shader {
 
 template<bool Debug>
-void RunInterpreter(UnitState<Debug>& state) {
+void RunnableInterpreterShader<Debug>::Compile() {}
+
+template void RunnableInterpreterShader<false>::Compile();
+template void RunnableInterpreterShader<true>::Compile();
+
+template<bool Debug>
+DebugData<Debug> RunnableInterpreterShader<Debug>::Run(unsigned int offset, UnitState& state, const InputRegisters& input, OutputRegisters& output) {
+    DebugData<Debug> debug;
     const auto& uniforms = g_state.vs.uniforms;
     const auto& swizzle_data = g_state.vs.swizzle_data;
     const auto& program_code = g_state.vs.program_code;
+
+    state.program_counter = offset;
 
     // Placeholder for invalid inputs
     static float24 dummy_vec4_float24[4];
@@ -53,22 +62,22 @@ void RunInterpreter(UnitState<Debug>& state) {
         const Instruction instr = { program_code[state.program_counter] };
         const SwizzlePattern swizzle = { swizzle_data[instr.common.operand_desc_id] };
 
-        static auto call = [](UnitState<Debug>& state, u32 offset, u32 num_instructions,
+        static auto call = [](UnitState& state, u32 offset, u32 num_instructions,
                               u32 return_offset, u8 repeat_count, u8 loop_increment) {
             state.program_counter = offset - 1; // -1 to make sure when incrementing the PC we end up at the correct offset
             ASSERT(state.call_stack.size() < state.call_stack.capacity());
             state.call_stack.push_back({ offset + num_instructions, return_offset, repeat_count, loop_increment, offset });
         };
-        Record<DebugDataRecord::CUR_INSTR>(state.debug, iteration, state.program_counter);
+        Record<DebugDataRecord::CUR_INSTR>(debug, iteration, state.program_counter);
         if (iteration > 0)
-            Record<DebugDataRecord::NEXT_INSTR>(state.debug, iteration - 1, state.program_counter);
+            Record<DebugDataRecord::NEXT_INSTR>(debug, iteration - 1, state.program_counter);
 
-        state.debug.max_offset = std::max<u32>(state.debug.max_offset, 1 + state.program_counter);
+        debug.max_offset = std::max<u32>(debug.max_offset, 1 + state.program_counter);
 
         auto LookupSourceRegister = [&](const SourceRegister& source_reg) -> const float24* {
             switch (source_reg.GetRegisterType()) {
             case RegisterType::Input:
-                return &state.registers.input[source_reg.GetIndex()].x;
+                return &input.registers[source_reg.GetIndex()].x;
 
             case RegisterType::Temporary:
                 return &state.registers.temporary[source_reg.GetIndex()].x;
@@ -120,59 +129,59 @@ void RunInterpreter(UnitState<Debug>& state) {
                 src2[3] = src2[3] * float24::FromFloat32(-1);
             }
 
-            float24* dest = (instr.common.dest.Value() < 0x10) ? &state.registers.output[instr.common.dest.Value().GetIndex()][0]
+            float24* dest = (instr.common.dest.Value() < 0x10) ? &output.registers[instr.common.dest.Value().GetIndex()][0]
                         : (instr.common.dest.Value() < 0x20) ? &state.registers.temporary[instr.common.dest.Value().GetIndex()][0]
                         : dummy_vec4_float24;
 
-            state.debug.max_opdesc_id = std::max<u32>(state.debug.max_opdesc_id, 1+instr.common.operand_desc_id);
+            debug.max_opdesc_id = std::max<u32>(debug.max_opdesc_id, 1+instr.common.operand_desc_id);
 
             switch (instr.opcode.Value().EffectiveOpCode()) {
             case OpCode::Id::ADD:
             {
-                Record<DebugDataRecord::SRC1>(state.debug, iteration, src1);
-                Record<DebugDataRecord::SRC2>(state.debug, iteration, src2);
-                Record<DebugDataRecord::DEST_IN>(state.debug, iteration, dest);
+                Record<DebugDataRecord::SRC1>(debug, iteration, src1);
+                Record<DebugDataRecord::SRC2>(debug, iteration, src2);
+                Record<DebugDataRecord::DEST_IN>(debug, iteration, dest);
                 for (int i = 0; i < 4; ++i) {
                     if (!swizzle.DestComponentEnabled(i))
                         continue;
 
                     dest[i] = src1[i] + src2[i];
                 }
-                Record<DebugDataRecord::DEST_OUT>(state.debug, iteration, dest);
+                Record<DebugDataRecord::DEST_OUT>(debug, iteration, dest);
                 break;
             }
 
             case OpCode::Id::MUL:
             {
-                Record<DebugDataRecord::SRC1>(state.debug, iteration, src1);
-                Record<DebugDataRecord::SRC2>(state.debug, iteration, src2);
-                Record<DebugDataRecord::DEST_IN>(state.debug, iteration, dest);
+                Record<DebugDataRecord::SRC1>(debug, iteration, src1);
+                Record<DebugDataRecord::SRC2>(debug, iteration, src2);
+                Record<DebugDataRecord::DEST_IN>(debug, iteration, dest);
                 for (int i = 0; i < 4; ++i) {
                     if (!swizzle.DestComponentEnabled(i))
                         continue;
 
                     dest[i] = src1[i] * src2[i];
                 }
-                Record<DebugDataRecord::DEST_OUT>(state.debug, iteration, dest);
+                Record<DebugDataRecord::DEST_OUT>(debug, iteration, dest);
                 break;
             }
 
             case OpCode::Id::FLR:
-                Record<DebugDataRecord::SRC1>(state.debug, iteration, src1);
-                Record<DebugDataRecord::DEST_IN>(state.debug, iteration, dest);
+                Record<DebugDataRecord::SRC1>(debug, iteration, src1);
+                Record<DebugDataRecord::DEST_IN>(debug, iteration, dest);
                 for (int i = 0; i < 4; ++i) {
                     if (!swizzle.DestComponentEnabled(i))
                         continue;
 
                     dest[i] = float24::FromFloat32(std::floor(src1[i].ToFloat32()));
                 }
-                Record<DebugDataRecord::DEST_OUT>(state.debug, iteration, dest);
+                Record<DebugDataRecord::DEST_OUT>(debug, iteration, dest);
                 break;
 
             case OpCode::Id::MAX:
-                Record<DebugDataRecord::SRC1>(state.debug, iteration, src1);
-                Record<DebugDataRecord::SRC2>(state.debug, iteration, src2);
-                Record<DebugDataRecord::DEST_IN>(state.debug, iteration, dest);
+                Record<DebugDataRecord::SRC1>(debug, iteration, src1);
+                Record<DebugDataRecord::SRC2>(debug, iteration, src2);
+                Record<DebugDataRecord::DEST_IN>(debug, iteration, dest);
                 for (int i = 0; i < 4; ++i) {
                     if (!swizzle.DestComponentEnabled(i))
                         continue;
@@ -182,13 +191,13 @@ void RunInterpreter(UnitState<Debug>& state) {
                     //   max(NaN, 0) -> 0
                     dest[i] = (src1[i] > src2[i]) ? src1[i] : src2[i];
                 }
-                Record<DebugDataRecord::DEST_OUT>(state.debug, iteration, dest);
+                Record<DebugDataRecord::DEST_OUT>(debug, iteration, dest);
                 break;
 
             case OpCode::Id::MIN:
-                Record<DebugDataRecord::SRC1>(state.debug, iteration, src1);
-                Record<DebugDataRecord::SRC2>(state.debug, iteration, src2);
-                Record<DebugDataRecord::DEST_IN>(state.debug, iteration, dest);
+                Record<DebugDataRecord::SRC1>(debug, iteration, src1);
+                Record<DebugDataRecord::SRC2>(debug, iteration, src2);
+                Record<DebugDataRecord::DEST_IN>(debug, iteration, dest);
                 for (int i = 0; i < 4; ++i) {
                     if (!swizzle.DestComponentEnabled(i))
                         continue;
@@ -198,7 +207,7 @@ void RunInterpreter(UnitState<Debug>& state) {
                     //   min(NaN, 0) -> 0
                     dest[i] = (src1[i] < src2[i]) ? src1[i] : src2[i];
                 }
-                Record<DebugDataRecord::DEST_OUT>(state.debug, iteration, dest);
+                Record<DebugDataRecord::DEST_OUT>(debug, iteration, dest);
                 break;
 
             case OpCode::Id::DP3:
@@ -206,9 +215,9 @@ void RunInterpreter(UnitState<Debug>& state) {
             case OpCode::Id::DPH:
             case OpCode::Id::DPHI:
             {
-                Record<DebugDataRecord::SRC1>(state.debug, iteration, src1);
-                Record<DebugDataRecord::SRC2>(state.debug, iteration, src2);
-                Record<DebugDataRecord::DEST_IN>(state.debug, iteration, dest);
+                Record<DebugDataRecord::SRC1>(debug, iteration, src1);
+                Record<DebugDataRecord::SRC2>(debug, iteration, src2);
+                Record<DebugDataRecord::DEST_IN>(debug, iteration, dest);
 
                 OpCode::Id opcode = instr.opcode.Value().EffectiveOpCode();
                 if (opcode == OpCode::Id::DPH || opcode == OpCode::Id::DPHI)
@@ -223,15 +232,15 @@ void RunInterpreter(UnitState<Debug>& state) {
 
                     dest[i] = dot;
                 }
-                Record<DebugDataRecord::DEST_OUT>(state.debug, iteration, dest);
+                Record<DebugDataRecord::DEST_OUT>(debug, iteration, dest);
                 break;
             }
 
             // Reciprocal
             case OpCode::Id::RCP:
             {
-                Record<DebugDataRecord::SRC1>(state.debug, iteration, src1);
-                Record<DebugDataRecord::DEST_IN>(state.debug, iteration, dest);
+                Record<DebugDataRecord::SRC1>(debug, iteration, src1);
+                Record<DebugDataRecord::DEST_IN>(debug, iteration, dest);
                 float24 rcp_res = float24::FromFloat32(1.0f / src1[0].ToFloat32());
                 for (int i = 0; i < 4; ++i) {
                     if (!swizzle.DestComponentEnabled(i))
@@ -239,15 +248,15 @@ void RunInterpreter(UnitState<Debug>& state) {
 
                     dest[i] = rcp_res;
                 }
-                Record<DebugDataRecord::DEST_OUT>(state.debug, iteration, dest);
+                Record<DebugDataRecord::DEST_OUT>(debug, iteration, dest);
                 break;
             }
 
             // Reciprocal Square Root
             case OpCode::Id::RSQ:
             {
-                Record<DebugDataRecord::SRC1>(state.debug, iteration, src1);
-                Record<DebugDataRecord::DEST_IN>(state.debug, iteration, dest);
+                Record<DebugDataRecord::SRC1>(debug, iteration, src1);
+                Record<DebugDataRecord::DEST_IN>(debug, iteration, dest);
                 float24 rsq_res = float24::FromFloat32(1.0f / std::sqrt(src1[0].ToFloat32()));
                 for (int i = 0; i < 4; ++i) {
                     if (!swizzle.DestComponentEnabled(i))
@@ -255,13 +264,13 @@ void RunInterpreter(UnitState<Debug>& state) {
 
                     dest[i] = rsq_res;
                 }
-                Record<DebugDataRecord::DEST_OUT>(state.debug, iteration, dest);
+                Record<DebugDataRecord::DEST_OUT>(debug, iteration, dest);
                 break;
             }
 
             case OpCode::Id::MOVA:
             {
-                Record<DebugDataRecord::SRC1>(state.debug, iteration, src1);
+                Record<DebugDataRecord::SRC1>(debug, iteration, src1);
                 for (int i = 0; i < 2; ++i) {
                     if (!swizzle.DestComponentEnabled(i))
                         continue;
@@ -269,55 +278,55 @@ void RunInterpreter(UnitState<Debug>& state) {
                     // TODO: Figure out how the rounding is done on hardware
                     state.address_registers[i] = static_cast<s32>(src1[i].ToFloat32());
                 }
-                Record<DebugDataRecord::ADDR_REG_OUT>(state.debug, iteration, state.address_registers);
+                Record<DebugDataRecord::ADDR_REG_OUT>(debug, iteration, state.address_registers);
                 break;
             }
 
             case OpCode::Id::MOV:
             {
-                Record<DebugDataRecord::SRC1>(state.debug, iteration, src1);
-                Record<DebugDataRecord::DEST_IN>(state.debug, iteration, dest);
+                Record<DebugDataRecord::SRC1>(debug, iteration, src1);
+                Record<DebugDataRecord::DEST_IN>(debug, iteration, dest);
                 for (int i = 0; i < 4; ++i) {
                     if (!swizzle.DestComponentEnabled(i))
                         continue;
 
                     dest[i] = src1[i];
                 }
-                Record<DebugDataRecord::DEST_OUT>(state.debug, iteration, dest);
+                Record<DebugDataRecord::DEST_OUT>(debug, iteration, dest);
                 break;
             }
 
             case OpCode::Id::SGE:
             case OpCode::Id::SGEI:
-                Record<DebugDataRecord::SRC1>(state.debug, iteration, src1);
-                Record<DebugDataRecord::SRC2>(state.debug, iteration, src2);
-                Record<DebugDataRecord::DEST_IN>(state.debug, iteration, dest);
+                Record<DebugDataRecord::SRC1>(debug, iteration, src1);
+                Record<DebugDataRecord::SRC2>(debug, iteration, src2);
+                Record<DebugDataRecord::DEST_IN>(debug, iteration, dest);
                 for (int i = 0; i < 4; ++i) {
                     if (!swizzle.DestComponentEnabled(i))
                         continue;
 
                     dest[i] = (src1[i] >= src2[i]) ? float24::FromFloat32(1.0f) : float24::FromFloat32(0.0f);
                 }
-                Record<DebugDataRecord::DEST_OUT>(state.debug, iteration, dest);
+                Record<DebugDataRecord::DEST_OUT>(debug, iteration, dest);
                 break;
 
             case OpCode::Id::SLT:
             case OpCode::Id::SLTI:
-                Record<DebugDataRecord::SRC1>(state.debug, iteration, src1);
-                Record<DebugDataRecord::SRC2>(state.debug, iteration, src2);
-                Record<DebugDataRecord::DEST_IN>(state.debug, iteration, dest);
+                Record<DebugDataRecord::SRC1>(debug, iteration, src1);
+                Record<DebugDataRecord::SRC2>(debug, iteration, src2);
+                Record<DebugDataRecord::DEST_IN>(debug, iteration, dest);
                 for (int i = 0; i < 4; ++i) {
                     if (!swizzle.DestComponentEnabled(i))
                         continue;
 
                     dest[i] = (src1[i] < src2[i]) ? float24::FromFloat32(1.0f) : float24::FromFloat32(0.0f);
                 }
-                Record<DebugDataRecord::DEST_OUT>(state.debug, iteration, dest);
+                Record<DebugDataRecord::DEST_OUT>(debug, iteration, dest);
                 break;
 
             case OpCode::Id::CMP:
-                Record<DebugDataRecord::SRC1>(state.debug, iteration, src1);
-                Record<DebugDataRecord::SRC2>(state.debug, iteration, src2);
+                Record<DebugDataRecord::SRC1>(debug, iteration, src1);
+                Record<DebugDataRecord::SRC2>(debug, iteration, src2);
                 for (int i = 0; i < 2; ++i) {
                     // TODO: Can you restrict to one compare via dest masking?
 
@@ -354,13 +363,13 @@ void RunInterpreter(UnitState<Debug>& state) {
                             break;
                     }
                 }
-                Record<DebugDataRecord::CMP_RESULT>(state.debug, iteration, state.conditional_code);
+                Record<DebugDataRecord::CMP_RESULT>(debug, iteration, state.conditional_code);
                 break;
 
             case OpCode::Id::EX2:
             {
-                Record<DebugDataRecord::SRC1>(state.debug, iteration, src1);
-                Record<DebugDataRecord::DEST_IN>(state.debug, iteration, dest);
+                Record<DebugDataRecord::SRC1>(debug, iteration, src1);
+                Record<DebugDataRecord::DEST_IN>(debug, iteration, dest);
 
                 // EX2 only takes first component exp2 and writes it to all dest components
                 float24 ex2_res = float24::FromFloat32(std::exp2(src1[0].ToFloat32()));
@@ -371,14 +380,14 @@ void RunInterpreter(UnitState<Debug>& state) {
                     dest[i] = ex2_res;
                 }
 
-                Record<DebugDataRecord::DEST_OUT>(state.debug, iteration, dest);
+                Record<DebugDataRecord::DEST_OUT>(debug, iteration, dest);
                 break;
             }
 
             case OpCode::Id::LG2:
             {
-                Record<DebugDataRecord::SRC1>(state.debug, iteration, src1);
-                Record<DebugDataRecord::DEST_IN>(state.debug, iteration, dest);
+                Record<DebugDataRecord::SRC1>(debug, iteration, src1);
+                Record<DebugDataRecord::DEST_IN>(debug, iteration, dest);
 
                 // LG2 only takes the first component log2 and writes it to all dest components
                 float24 lg2_res = float24::FromFloat32(std::log2(src1[0].ToFloat32()));
@@ -389,7 +398,7 @@ void RunInterpreter(UnitState<Debug>& state) {
                     dest[i] = lg2_res;
                 }
 
-                Record<DebugDataRecord::DEST_OUT>(state.debug, iteration, dest);
+                Record<DebugDataRecord::DEST_OUT>(debug, iteration, dest);
                 break;
             }
 
@@ -459,21 +468,21 @@ void RunInterpreter(UnitState<Debug>& state) {
                     src3[3] = src3[3] * float24::FromFloat32(-1);
                 }
 
-                float24* dest = (instr.mad.dest.Value() < 0x10) ? &state.registers.output[instr.mad.dest.Value().GetIndex()][0]
+                float24* dest = (instr.mad.dest.Value() < 0x10) ? &output.registers[instr.mad.dest.Value().GetIndex()][0]
                             : (instr.mad.dest.Value() < 0x20) ? &state.registers.temporary[instr.mad.dest.Value().GetIndex()][0]
                             : dummy_vec4_float24;
 
-                Record<DebugDataRecord::SRC1>(state.debug, iteration, src1);
-                Record<DebugDataRecord::SRC2>(state.debug, iteration, src2);
-                Record<DebugDataRecord::SRC3>(state.debug, iteration, src3);
-                Record<DebugDataRecord::DEST_IN>(state.debug, iteration, dest);
+                Record<DebugDataRecord::SRC1>(debug, iteration, src1);
+                Record<DebugDataRecord::SRC2>(debug, iteration, src2);
+                Record<DebugDataRecord::SRC3>(debug, iteration, src3);
+                Record<DebugDataRecord::DEST_IN>(debug, iteration, dest);
                 for (int i = 0; i < 4; ++i) {
                     if (!swizzle.DestComponentEnabled(i))
                         continue;
 
                     dest[i] = src1[i] * src2[i] + src3[i];
                 }
-                Record<DebugDataRecord::DEST_OUT>(state.debug, iteration, dest);
+                Record<DebugDataRecord::DEST_OUT>(debug, iteration, dest);
             } else {
                 LOG_ERROR(HW_GPU, "Unhandled multiply-add instruction: 0x%02x (%s): 0x%08x",
                           (int)instr.opcode.Value().EffectiveOpCode(), instr.opcode.Value().GetInfo().name, instr.hex);
@@ -483,7 +492,7 @@ void RunInterpreter(UnitState<Debug>& state) {
 
         default:
         {
-            static auto evaluate_condition = [](const UnitState<Debug>& state, bool refx, bool refy, Instruction::FlowControlType flow_control) {
+            static auto evaluate_condition = [](const UnitState& state, bool refx, bool refy, Instruction::FlowControlType flow_control) {
                 bool results[2] = { refx == state.conditional_code[0],
                                     refy == state.conditional_code[1] };
 
@@ -509,14 +518,14 @@ void RunInterpreter(UnitState<Debug>& state) {
                 break;
 
             case OpCode::Id::JMPC:
-                Record<DebugDataRecord::COND_CMP_IN>(state.debug, iteration, state.conditional_code);
+                Record<DebugDataRecord::COND_CMP_IN>(debug, iteration, state.conditional_code);
                 if (evaluate_condition(state, instr.flow_control.refx, instr.flow_control.refy, instr.flow_control)) {
                     state.program_counter = instr.flow_control.dest_offset - 1;
                 }
                 break;
 
             case OpCode::Id::JMPU:
-                Record<DebugDataRecord::COND_BOOL_IN>(state.debug, iteration, uniforms.b[instr.flow_control.bool_uniform_id]);
+                Record<DebugDataRecord::COND_BOOL_IN>(debug, iteration, uniforms.b[instr.flow_control.bool_uniform_id]);
 
                 if (uniforms.b[instr.flow_control.bool_uniform_id] == !(instr.flow_control.num_instructions & 1)) {
                     state.program_counter = instr.flow_control.dest_offset - 1;
@@ -531,7 +540,7 @@ void RunInterpreter(UnitState<Debug>& state) {
                 break;
 
             case OpCode::Id::CALLU:
-                Record<DebugDataRecord::COND_BOOL_IN>(state.debug, iteration, uniforms.b[instr.flow_control.bool_uniform_id]);
+                Record<DebugDataRecord::COND_BOOL_IN>(debug, iteration, uniforms.b[instr.flow_control.bool_uniform_id]);
                 if (uniforms.b[instr.flow_control.bool_uniform_id]) {
                     call(state,
                         instr.flow_control.dest_offset,
@@ -541,7 +550,7 @@ void RunInterpreter(UnitState<Debug>& state) {
                 break;
 
             case OpCode::Id::CALLC:
-                Record<DebugDataRecord::COND_CMP_IN>(state.debug, iteration, state.conditional_code);
+                Record<DebugDataRecord::COND_CMP_IN>(debug, iteration, state.conditional_code);
                 if (evaluate_condition(state, instr.flow_control.refx, instr.flow_control.refy, instr.flow_control)) {
                     call(state,
                         instr.flow_control.dest_offset,
@@ -554,7 +563,7 @@ void RunInterpreter(UnitState<Debug>& state) {
                 break;
 
             case OpCode::Id::IFU:
-                Record<DebugDataRecord::COND_BOOL_IN>(state.debug, iteration, uniforms.b[instr.flow_control.bool_uniform_id]);
+                Record<DebugDataRecord::COND_BOOL_IN>(debug, iteration, uniforms.b[instr.flow_control.bool_uniform_id]);
                 if (uniforms.b[instr.flow_control.bool_uniform_id]) {
                     call(state,
                          state.program_counter + 1,
@@ -573,7 +582,7 @@ void RunInterpreter(UnitState<Debug>& state) {
             {
                 // TODO: Do we need to consider swizzlers here?
 
-                Record<DebugDataRecord::COND_CMP_IN>(state.debug, iteration, state.conditional_code);
+                Record<DebugDataRecord::COND_CMP_IN>(debug, iteration, state.conditional_code);
                 if (evaluate_condition(state, instr.flow_control.refx, instr.flow_control.refy, instr.flow_control)) {
                     call(state,
                          state.program_counter + 1,
@@ -597,7 +606,7 @@ void RunInterpreter(UnitState<Debug>& state) {
                                           uniforms.i[instr.flow_control.int_uniform_id].w);
                 state.address_registers[2] = loop_param.y;
 
-                Record<DebugDataRecord::LOOP_INT_IN>(state.debug, iteration, loop_param);
+                Record<DebugDataRecord::LOOP_INT_IN>(debug, iteration, loop_param);
                 call(state,
                      state.program_counter + 1,
                      instr.flow_control.dest_offset - state.program_counter + 1,
@@ -620,11 +629,19 @@ void RunInterpreter(UnitState<Debug>& state) {
         ++state.program_counter;
         ++iteration;
     }
+
+    return debug;
 }
 
+template DebugData<false> RunnableInterpreterShader<false>::Run(unsigned int offset, UnitState& state, const InputRegisters& input, OutputRegisters& output);
+template DebugData<true> RunnableInterpreterShader<true>::Run(unsigned int offset, UnitState& state, const InputRegisters& input, OutputRegisters& output);
+
+#if 0
+//FIXME!
 // Explicit instantiation
-template void RunInterpreter(UnitState<false>& state);
-template void RunInterpreter(UnitState<true>& state);
+template void RunnableInterpreterShader::RunInterpreter(UnitState<false>& state);
+template void RunnableInterpreterShader::RunInterpreter(UnitState<true>& state);
+#endif
 
 } // namespace
 
