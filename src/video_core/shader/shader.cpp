@@ -101,6 +101,8 @@ void ShaderSetup::Setup() {
             jit_shader = shader;
             shader_map[cache_key] = std::move(shader);
         }
+    } else {
+        jit_shader.reset();
     }
 #endif // ARCHITECTURE_x86_64
 }
@@ -125,8 +127,8 @@ void ShaderSetup::Run(UnitState<false>& state, const InputVertex& input, int num
     state.conditional_code[1] = false;
 
 #ifdef ARCHITECTURE_x86_64
-    if (VideoCore::g_shader_jit_enabled)
-        jit_shader.lock().get()->Run(*this, state, config.main_offset);
+    if (auto shader = jit_shader.lock())
+        shader.get()->Run(*this, state, config.main_offset);
     else
         RunInterpreter(*this, state, config.main_offset);
 #else
