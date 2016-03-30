@@ -156,6 +156,164 @@ DebugData<true> ShaderSetup::ProduceDebugInfo(const InputVertex& input, int num_
     return state.debug;
 }
 
+bool SharedGS() {
+    return g_state.regs.vs_com_mode == Pica::Regs::VSComMode::Shared;
+}
+
+void WriteUniformBoolReg(bool gs, u32 value) {
+    auto& setup = gs ? g_state.gs : g_state.vs;
+
+    ASSERT(setup.uniforms.b.size() == 16);
+    for (unsigned i = 0; i < 16; ++i)
+        setup.uniforms.b[i] = (value & (1 << i)) != 0;
+
+    // Copy for GS in shared mode
+    if (!gs && SharedGS()) {
+        WriteUniformBoolReg(true, value);
+    }
+}
+
+void WriteUniformIntReg(bool gs, unsigned index, const Math::Vec4<u8>& values) {
+    const char* shader_type = gs ? "GS" : "VS";
+    auto& setup = gs ? g_state.gs : g_state.vs;
+
+    ASSERT(index < setup.uniforms.i.size());
+    setup.uniforms.i[index] = values;
+    LOG_TRACE(HW_GPU, "Set %s integer uniform %d to %02x %02x %02x %02x", shader_type, index,
+              values.x.Value(), values.y.Value(), values.z.Value(), values.w.Value());
+
+    // Copy for GS in shared mode
+    if (!gs && SharedGS()) {
+        WriteUniformIntReg(true, index, values);
+    }
+}
+
+void WriteUniformFloatSetupReg(bool gs, u32 value) {
+    auto& config = gs ? g_state.regs.gs : g_state.regs.vs;
+
+    config.uniform_setup.setup = value;
+
+    // Copy for GS in shared mode
+    if (!gs && SharedGS()) {
+        WriteUniformFloatSetupReg(true, value);
+    }
+}
+
+void WriteUniformFloatReg(bool gs, u32 value) {
+    const char* shader_type = gs ? "GS" : "VS";
+    auto& config = gs ? g_state.regs.gs : g_state.regs.vs;
+    auto& setup = gs ? g_state.gs : g_state.vs;
+
+    auto& uniform_setup = config.uniform_setup;
+    auto& uniform_write_buffer = setup.uniform_write_buffer;
+    auto& float_regs_counter = setup.float_regs_counter;
+
+    // TODO: Does actual hardware indeed keep an intermediate buffer or does
+    //       it directly write the values?
+    uniform_write_buffer[float_regs_counter++] = value;
+
+    // Uniforms are written in a packed format such that four float24 values are
+    // encoded in
+    // three 32-bit numbers. We write to internal memory once a full such vector
+    // is
+    // written.
+    if ((float_regs_counter >= 4 && uniform_setup.IsFloat32()) ||
+        (float_regs_counter >= 3 && !uniform_setup.IsFloat32())) {
+        float_regs_counter = 0;
+
+        auto& uniform = setup.uniforms.f[uniform_setup.index];
+
+        if (uniform_setup.index >= 96) {
+            LOG_ERROR(HW_GPU, "Invalid %s float uniform index %d", shader_type,
+                      (int)uniform_setup.index);
+        } else {
+
+            // NOTE: The destination component order indeed is "backwards"
+            if (uniform_setup.IsFloat32()) {
+                for (auto i : {0, 1, 2, 3})
+                    uniform[3 - i] = float24::FromFloat32(*(float*)(&uniform_write_buffer[i]));
+            } else {
+                // TODO: Untested
+                uniform.w = float24::FromRaw(uniform_write_buffer[0] >> 8);
+                uniform.z = float24::FromRaw(((uniform_write_buffer[0] & 0xFF) << 16) |
+                                             ((uniform_write_buffer[1] >> 16) & 0xFFFF));
+                uniform.y = float24::FromRaw(((uniform_write_buffer[1] & 0xFFFF) << 8) |
+                                             ((uniform_write_buffer[2] >> 24) & 0xFF));
+                uniform.x = float24::FromRaw(uniform_write_buffer[2] & 0xFFFFFF);
+            }
+
+            LOG_TRACE(HW_GPU, "Set %s float uniform %x to (%f %f %f %f)", shader_type,
+                      (int)uniform_setup.index, uniform.x.ToFloat32(), uniform.y.ToFloat32(),
+                      uniform.z.ToFloat32(), uniform.w.ToFloat32());
+
+            // TODO: Verify that this actually modifies the register!
+            uniform_setup.index.Assign(uniform_setup.index + 1);
+        }
+    }
+
+    // Copy for GS in shared mode
+    if (!gs && SharedGS()) {
+        WriteUniformFloatReg(true, value);
+    }
+}
+
+void WriteProgramCodeOffset(bool gs, u32 value) {
+    auto& config = gs ? g_state.regs.gs : g_state.regs.vs;
+    config.program.offset = value;
+
+    // Copy for GS in shared mode
+    if (!gs && SharedGS()) {
+        WriteProgramCodeOffset(true, value);
+    }
+}
+
+void WriteProgramCode(bool gs, u32 value) {
+    const char* shader_type = gs ? "GS" : "VS";
+    auto& config = gs ? g_state.regs.gs : g_state.regs.vs;
+    auto& setup = gs ? g_state.gs : g_state.vs;
+
+    if (config.program.offset >= setup.program_code.size()) {
+        LOG_ERROR(HW_GPU, "Invalid %s program offset %d", shader_type, (int)config.program.offset);
+    } else {
+        setup.program_code[config.program.offset] = value;
+        config.program.offset++;
+    }
+
+    // Copy for GS in shared mode
+    if (!gs && SharedGS()) {
+        WriteProgramCode(true, value);
+    }
+}
+
+void WriteSwizzlePatternsOffset(bool gs, u32 value) {
+    auto& config = gs ? g_state.regs.gs : g_state.regs.vs;
+    config.swizzle_patterns.offset = value;
+
+    // Copy for GS in shared mode
+    if (!gs && SharedGS()) {
+        WriteSwizzlePatternsOffset(true, value);
+    }
+}
+
+void WriteSwizzlePatterns(bool gs, u32 value) {
+    const char* shader_type = gs ? "GS" : "VS";
+    auto& config = gs ? g_state.regs.gs : g_state.regs.vs;
+    auto& setup = gs ? g_state.gs : g_state.vs;
+
+    if (config.swizzle_patterns.offset >= setup.swizzle_data.size()) {
+        LOG_ERROR(HW_GPU, "Invalid %s swizzle pattern offset %d", shader_type,
+                  (int)config.swizzle_patterns.offset);
+    } else {
+        setup.swizzle_data[config.swizzle_patterns.offset] = value;
+        config.swizzle_patterns.offset++;
+    }
+
+    // Copy for GS in shared mode
+    if (!gs && SharedGS()) {
+        WriteSwizzlePatterns(true, value);
+    }
+}
+
 } // namespace Shader
 
 } // namespace Pica

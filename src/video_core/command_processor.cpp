@@ -30,10 +30,6 @@ namespace Pica {
 
 namespace CommandProcessor {
 
-static int float_regs_counter = 0;
-
-static u32 uniform_write_buffer[4];
-
 static int default_attr_counter = 0;
 
 static u32 default_attr_write_buffer[3];
@@ -315,22 +311,23 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
     }
 
     case PICA_REG_INDEX(vs.bool_uniforms):
-        for (unsigned i = 0; i < 16; ++i)
-            g_state.vs.uniforms.b[i] = (regs.vs.bool_uniforms.Value() & (1 << i)) != 0;
-
+        Shader::WriteUniformBoolReg(false, value);
         break;
 
     case PICA_REG_INDEX_WORKAROUND(vs.int_uniforms[0], 0x2b1):
     case PICA_REG_INDEX_WORKAROUND(vs.int_uniforms[1], 0x2b2):
     case PICA_REG_INDEX_WORKAROUND(vs.int_uniforms[2], 0x2b3):
     case PICA_REG_INDEX_WORKAROUND(vs.int_uniforms[3], 0x2b4): {
-        int index = (id - PICA_REG_INDEX_WORKAROUND(vs.int_uniforms[0], 0x2b1));
+        unsigned index = (id - PICA_REG_INDEX_WORKAROUND(vs.int_uniforms[0], 0x2b1));
         auto values = regs.vs.int_uniforms[index];
-        g_state.vs.uniforms.i[index] = Math::Vec4<u8>(values.x, values.y, values.z, values.w);
-        LOG_TRACE(HW_GPU, "Set integer uniform %d to %02x %02x %02x %02x", index, values.x.Value(),
-                  values.y.Value(), values.z.Value(), values.w.Value());
+        Shader::WriteUniformIntReg(false, index,
+                                   Math::Vec4<u8>(values.x, values.y, values.z, values.w));
         break;
     }
+
+    case PICA_REG_INDEX_WORKAROUND(vs.uniform_setup.setup, 0x2c0):
+        Shader::WriteUniformFloatSetupReg(false, value);
+        break;
 
     case PICA_REG_INDEX_WORKAROUND(vs.uniform_setup.set_value[0], 0x2c1):
     case PICA_REG_INDEX_WORKAROUND(vs.uniform_setup.set_value[1], 0x2c2):
@@ -340,51 +337,15 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
     case PICA_REG_INDEX_WORKAROUND(vs.uniform_setup.set_value[5], 0x2c6):
     case PICA_REG_INDEX_WORKAROUND(vs.uniform_setup.set_value[6], 0x2c7):
     case PICA_REG_INDEX_WORKAROUND(vs.uniform_setup.set_value[7], 0x2c8): {
-        auto& uniform_setup = regs.vs.uniform_setup;
-
-        // TODO: Does actual hardware indeed keep an intermediate buffer or does
-        //       it directly write the values?
-        uniform_write_buffer[float_regs_counter++] = value;
-
-        // Uniforms are written in a packed format such that four float24 values are encoded in
-        // three 32-bit numbers. We write to internal memory once a full such vector is
-        // written.
-        if ((float_regs_counter >= 4 && uniform_setup.IsFloat32()) ||
-            (float_regs_counter >= 3 && !uniform_setup.IsFloat32())) {
-            float_regs_counter = 0;
-
-            auto& uniform = g_state.vs.uniforms.f[uniform_setup.index];
-
-            if (uniform_setup.index > 95) {
-                LOG_ERROR(HW_GPU, "Invalid VS uniform index %d", (int)uniform_setup.index);
-                break;
-            }
-
-            // NOTE: The destination component order indeed is "backwards"
-            if (uniform_setup.IsFloat32()) {
-                for (auto i : {0, 1, 2, 3})
-                    uniform[3 - i] = float24::FromFloat32(*(float*)(&uniform_write_buffer[i]));
-            } else {
-                // TODO: Untested
-                uniform.w = float24::FromRaw(uniform_write_buffer[0] >> 8);
-                uniform.z = float24::FromRaw(((uniform_write_buffer[0] & 0xFF) << 16) |
-                                             ((uniform_write_buffer[1] >> 16) & 0xFFFF));
-                uniform.y = float24::FromRaw(((uniform_write_buffer[1] & 0xFFFF) << 8) |
-                                             ((uniform_write_buffer[2] >> 24) & 0xFF));
-                uniform.x = float24::FromRaw(uniform_write_buffer[2] & 0xFFFFFF);
-            }
-
-            LOG_TRACE(HW_GPU, "Set uniform %x to (%f %f %f %f)", (int)uniform_setup.index,
-                      uniform.x.ToFloat32(), uniform.y.ToFloat32(), uniform.z.ToFloat32(),
-                      uniform.w.ToFloat32());
-
-            // TODO: Verify that this actually modifies the register!
-            uniform_setup.index.Assign(uniform_setup.index + 1);
-        }
+        Shader::WriteUniformFloatReg(false, value);
         break;
     }
 
     // Load shader program code
+    case PICA_REG_INDEX_WORKAROUND(vs.program.offset, 0x2cb):
+        Shader::WriteProgramCodeOffset(false, value);
+        break;
+
     case PICA_REG_INDEX_WORKAROUND(vs.program.set_word[0], 0x2cc):
     case PICA_REG_INDEX_WORKAROUND(vs.program.set_word[1], 0x2cd):
     case PICA_REG_INDEX_WORKAROUND(vs.program.set_word[2], 0x2ce):
@@ -393,12 +354,15 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
     case PICA_REG_INDEX_WORKAROUND(vs.program.set_word[5], 0x2d1):
     case PICA_REG_INDEX_WORKAROUND(vs.program.set_word[6], 0x2d2):
     case PICA_REG_INDEX_WORKAROUND(vs.program.set_word[7], 0x2d3): {
-        g_state.vs.program_code[regs.vs.program.offset] = value;
-        regs.vs.program.offset++;
+        Shader::WriteProgramCode(false, value);
         break;
     }
 
     // Load swizzle pattern data
+    case PICA_REG_INDEX_WORKAROUND(vs.swizzle_patterns.offset, 0x2d5):
+        Shader::WriteSwizzlePatternsOffset(false, value);
+        break;
+
     case PICA_REG_INDEX_WORKAROUND(vs.swizzle_patterns.set_word[0], 0x2d6):
     case PICA_REG_INDEX_WORKAROUND(vs.swizzle_patterns.set_word[1], 0x2d7):
     case PICA_REG_INDEX_WORKAROUND(vs.swizzle_patterns.set_word[2], 0x2d8):
@@ -407,8 +371,7 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
     case PICA_REG_INDEX_WORKAROUND(vs.swizzle_patterns.set_word[5], 0x2db):
     case PICA_REG_INDEX_WORKAROUND(vs.swizzle_patterns.set_word[6], 0x2dc):
     case PICA_REG_INDEX_WORKAROUND(vs.swizzle_patterns.set_word[7], 0x2dd): {
-        g_state.vs.swizzle_data[regs.vs.swizzle_patterns.offset] = value;
-        regs.vs.swizzle_patterns.offset++;
+        Shader::WriteSwizzlePatterns(false, value);
         break;
     }
 
