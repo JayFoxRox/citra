@@ -155,6 +155,30 @@ inline GLenum CompareFunc(Pica::Regs::CompareFunc func) {
     return compare_func_table[(unsigned)func];
 }
 
+/// Pretend we compare 'x FUNC x'
+inline GLenum CompareXToXFunc(Pica::Regs::CompareFunc func) {
+    static const GLenum compare_func_table[] = {
+        GL_NEVER,    // CompareFunc::Never
+        GL_ALWAYS,   // CompareFunc::Always
+        GL_ALWAYS,   // CompareFunc::Equal
+        GL_NEVER,    // CompareFunc::NotEqual
+        GL_NEVER,    // CompareFunc::LessThan
+        GL_ALWAYS,   // CompareFunc::LessThanOrEqual
+        GL_NEVER,    // CompareFunc::GreaterThan
+        GL_ALWAYS,   // CompareFunc::GreaterThanOrEqual
+    };
+
+    // Range check table for input
+    if (static_cast<size_t>(func) >= ARRAY_SIZE(compare_func_table)) {
+        LOG_CRITICAL(Render_OpenGL, "Unknown compare function %d", func);
+        UNREACHABLE();
+
+        return GL_ALWAYS;
+    }
+
+    return compare_func_table[(unsigned)func];
+}
+
 /// Pretend we compare 'x FUNC 0' (unsigned)
 inline GLenum CompareXToZeroFunc(Pica::Regs::CompareFunc func) {
     static const GLenum compare_func_table[] = {

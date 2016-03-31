@@ -151,8 +151,8 @@ void RasterizerOpenGL::Reset() {
     SyncBlendFuncs();
     SyncBlendColor();
     SyncLogicOp();
-    SyncStencilTest();
     SyncDepthTest();
+    SyncStencilTest();
     SyncColorWriteMask();
     SyncStencilWriteMask();
     SyncDepthWriteMask();
@@ -289,6 +289,7 @@ void RasterizerOpenGL::NotifyPicaRegisterChanged(u32 id) {
     // Depth test
     case PICA_REG_INDEX(output_merger.depth_test_enable):
         SyncDepthTest();
+        SyncStencilTest();
         SyncDepthWriteMask();
         SyncColorWriteMask();
         break;
@@ -313,6 +314,7 @@ void RasterizerOpenGL::NotifyPicaRegisterChanged(u32 id) {
     // Stencil and depth read mask
     case PICA_REG_INDEX(framebuffer.allow_stencil_read):
         SyncDepthTest();
+        SyncStencilTest();
         break;
 
     // Logic op
@@ -1008,17 +1010,117 @@ void RasterizerOpenGL::SyncDepthWriteMask() {
     state.depth.write_mask = regs.framebuffer.allow_depth_write && regs.output_merger.depth_write_enable ? GL_TRUE : GL_FALSE;
 }
 
+// Depends on the correct GL DepthTest state!
 void RasterizerOpenGL::SyncStencilTest() {
     const auto& regs = Pica::g_state.regs;
-    state.stencil.test_enabled = regs.output_merger.stencil_test.enable && regs.framebuffer.depth_format == Pica::Regs::DepthFormat::D24S8;
-    state.stencil.test_func = PicaToGL::CompareFunc(regs.output_merger.stencil_test.func);
-    state.stencil.test_ref = regs.output_merger.stencil_test.reference_value;
-    state.stencil.test_mask = regs.output_merger.stencil_test.input_mask;
-    state.stencil.action_stencil_fail = PicaToGL::StencilOp(regs.output_merger.stencil_test.action_stencil_fail);
-    state.stencil.action_depth_fail = PicaToGL::StencilOp(regs.output_merger.stencil_test.action_depth_fail);
-    state.stencil.action_depth_pass = PicaToGL::StencilOp(regs.output_merger.stencil_test.action_depth_pass);
+    const auto& stencil_test = regs.output_merger.stencil_test;
+
+    state.stencil.test_enabled = stencil_test.enable && regs.framebuffer.depth_format == Pica::Regs::DepthFormat::D24S8;
+
+    if (state.stencil.test_enabled) {
+        if (!regs.framebuffer.allow_stencil_read) {
+
+            // All stencil reads must be emulated as 0x00
+
+            u8 masked_ref = (stencil_test.reference_value & stencil_test.input_mask);
+
+            if (masked_ref == 0x00) {
+                // x = 0x00
+                state.stencil.test_func = PicaToGL::CompareXToXFunc(stencil_test.func);
+            } else {
+                // x = masked stencil ref
+                state.stencil.test_func = PicaToGL::CompareXToZeroFunc(stencil_test.func);
+            }
+
+            //FIXME: check if writeback is possible, otherwise this is useless
+            if (true) {
+
+                // We need a stencil read if we can't decide the stencil test staticly
+                bool needs_stencil_read = (state.stencil.test_func != GL_NEVER &&
+                                           state.stencil.test_func != GL_ALWAYS);
+
+                //TODO: In rare cases the stencil test doesn't depend on the masked ref ('Never' and 'Always') and only 1 specific value for
+                //      the stencil op writes is necessary. In those cases one could set the ref and ref-mask to the required value.
+                //FIXME: Return value instead..?
+                auto StencilAllowedOp = [&](Pica::Regs::StencilAction action) -> GLenum {
+
+                    switch (action) {
+
+                    // FIXME: Decide for one of those:
+                    //a. Keeping the framebuffer value means reading zero, writing back zero
+                    //b. Keeping the framebuffer value means not touching it
+                    case Pica::Regs::StencilAction::Keep:
+                        return GL_ZERO; // a
+                        return GL_KEEP; // b
+
+                    // Always 0x01, requires 0x01 in masked_ref to work
+                    case Pica::Regs::StencilAction::Increment:
+                    case Pica::Regs::StencilAction::IncrementWrap:
+                        if (masked_ref != 0x01) {
+                            needs_stencil_read = true;
+                        }
+                        return GL_REPLACE;
+
+                    // Always 0xFF, requires 0xFF in masked_ref to work
+                    case Pica::Regs::StencilAction::Invert:
+                    case Pica::Regs::StencilAction::DecrementWrap:
+                        if (masked_ref != 0xFF) {
+                            needs_stencil_read = true;
+                        }
+                        return GL_REPLACE;
+
+                    // Always masked ref
+                    case Pica::Regs::StencilAction::Replace:
+                        return GL_REPLACE;
+
+                    // Always 0x00
+                    case Pica::Regs::StencilAction::Zero:
+                    case Pica::Regs::StencilAction::Decrement:
+                        return GL_ZERO;
+
+                    default:
+                        LOG_CRITICAL(Render_OpenGL, "Unknown stencil action %x", (int)action);
+                        UNIMPLEMENTED();
+                        return GL_KEEP;
+                    }
+
+                };
+
+                // If the stencil test can fail we have to check the stencil op
+                if (state.depth.test_func != GL_ALWAYS) {
+                    state.stencil.action_stencil_fail = StencilAllowedOp(stencil_test.action_stencil_fail);
+                }
+
+                // If the depth test can pass we have to check the stencil op
+                if (state.depth.test_func != GL_NEVER) {
+                    state.stencil.action_depth_fail = StencilAllowedOp(stencil_test.action_depth_pass);
+                }
+
+                // If the depth test can fail we have to check the stencil op
+                if (state.depth.test_func != GL_ALWAYS) {
+                    state.stencil.action_depth_pass = StencilAllowedOp(stencil_test.action_depth_fail);
+                }
+
+                // Now check if we support this mode
+                if (needs_stencil_read) {
+                    LOG_CRITICAL(Render_OpenGL, "Can't emulate disabled read from stencil yet");
+                    UNIMPLEMENTED();
+                }
+
+            }
+
+        } else {
+            state.stencil.test_func = PicaToGL::CompareFunc(stencil_test.func);
+            state.stencil.test_ref = stencil_test.reference_value;
+            state.stencil.test_mask = stencil_test.input_mask;
+            state.stencil.action_stencil_fail = PicaToGL::StencilOp(stencil_test.action_stencil_fail);
+            state.stencil.action_depth_fail = PicaToGL::StencilOp(stencil_test.action_depth_fail);
+            state.stencil.action_depth_pass = PicaToGL::StencilOp(stencil_test.action_depth_pass);
+        }
+    }
 }
 
+// Always call SyncStencilTest after this returns!
 void RasterizerOpenGL::SyncDepthTest() {
     const auto& regs = Pica::g_state.regs;
 
