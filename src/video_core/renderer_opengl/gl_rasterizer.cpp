@@ -310,6 +310,11 @@ void RasterizerOpenGL::NotifyPicaRegisterChanged(u32 id) {
         SyncBlendFuncs();
         break;
 
+    // Stencil and depth read mask
+    case PICA_REG_INDEX(framebuffer.allow_stencil_read):
+        SyncDepthTest();
+        break;
+
     // Logic op
     case PICA_REG_INDEX(output_merger.logic_op):
         SyncLogicOp();
@@ -1016,10 +1021,30 @@ void RasterizerOpenGL::SyncStencilTest() {
 
 void RasterizerOpenGL::SyncDepthTest() {
     const auto& regs = Pica::g_state.regs;
-    state.depth.test_enabled = regs.output_merger.depth_test_enable  == 1 ||
-                               regs.output_merger.depth_write_enable == 1;
-    state.depth.test_func = regs.output_merger.depth_test_enable == 1 ?
-                            PicaToGL::CompareFunc(regs.output_merger.depth_test_func) : GL_ALWAYS;
+
+    // Enable depth test so depth writes can still occur
+    state.depth.test_enabled = GL_TRUE;
+
+    if (!regs.output_merger.depth_test_enable) {
+        state.depth.test_func = GL_ALWAYS;
+    } else {
+
+        if (!regs.framebuffer.allow_depth_read) {
+
+            // If reads are not allowed we have to patch the depth test accordingly
+            state.depth.test_func = PicaToGL::CompareXToZeroFunc(regs.output_merger.depth_test_func);
+
+            // Check if the result is known at this point, if not it depends on the framebuffer really being zero
+            if (state.depth.test_func != GL_NEVER && state.depth.test_func != GL_ALWAYS) {
+                LOG_CRITICAL(Render_OpenGL, "Can't emulate disabled read on depth yet");
+                UNIMPLEMENTED();
+            }
+
+        } else {
+            state.depth.test_func = PicaToGL::CompareFunc(regs.output_merger.depth_test_func);
+        }
+
+    }
 }
 
 void RasterizerOpenGL::SyncCombinerColor() {
