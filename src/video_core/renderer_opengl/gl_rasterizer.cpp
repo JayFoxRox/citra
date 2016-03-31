@@ -391,6 +391,12 @@ void RasterizerOpenGL::NotifyPicaRegisterChanged(u32 id) {
         SyncColorWriteMask();
         break;
 
+    // Color read mask
+    case PICA_REG_INDEX(framebuffer.allow_color_read):
+        SyncLogicOp();
+        SyncBlendFuncs();
+        break;
+
     // Scissor test
     case PICA_REG_INDEX(scissor_test.mode):
         shader_dirty = true;
@@ -1145,16 +1151,41 @@ void RasterizerOpenGL::SyncBlendEnabled() {
 
 void RasterizerOpenGL::SyncBlendFuncs() {
     const auto& regs = Pica::g_state.regs;
+
+    // This function pretends the destination read was 0x00 if the reads are not allowed
+    auto BlendAllowedFunc = [&](bool dest, Pica::Regs::BlendFactor factor) -> GLenum {
+
+        if (regs.framebuffer.allow_color_read == 0x0) {
+
+            // Destination would only read zero, so we can multiply by ZERO in blend func
+            if (dest)
+                return GL_ZERO;
+
+            if (factor == Pica::Regs::BlendFactor::DestColor ||
+                factor == Pica::Regs::BlendFactor::DestAlpha)
+                return GL_ZERO;
+
+            if (factor == Pica::Regs::BlendFactor::OneMinusDestColor ||
+                factor == Pica::Regs::BlendFactor::OneMinusDestAlpha)
+                return GL_ONE;
+
+        }
+
+        return PicaToGL::BlendFunc(factor);
+    };
+
     state.blend.rgb_equation =
         PicaToGL::BlendEquation(regs.output_merger.alpha_blending.blend_equation_rgb);
     state.blend.a_equation =
         PicaToGL::BlendEquation(regs.output_merger.alpha_blending.blend_equation_a);
     state.blend.src_rgb_func =
-        PicaToGL::BlendFunc(regs.output_merger.alpha_blending.factor_source_rgb);
+        BlendAllowedFunc(false, regs.output_merger.alpha_blending.factor_source_rgb);
     state.blend.dst_rgb_func =
-        PicaToGL::BlendFunc(regs.output_merger.alpha_blending.factor_dest_rgb);
-    state.blend.src_a_func = PicaToGL::BlendFunc(regs.output_merger.alpha_blending.factor_source_a);
-    state.blend.dst_a_func = PicaToGL::BlendFunc(regs.output_merger.alpha_blending.factor_dest_a);
+        BlendAllowedFunc(true, regs.output_merger.alpha_blending.factor_dest_rgb);
+    state.blend.src_a_func =
+        BlendAllowedFunc(false, regs.output_merger.alpha_blending.factor_source_a);
+    state.blend.dst_a_func =
+        BlendAllowedFunc(true, regs.output_merger.alpha_blending.factor_dest_a);
 }
 
 void RasterizerOpenGL::SyncBlendColor() {
@@ -1197,7 +1228,61 @@ void RasterizerOpenGL::SyncAlphaTest() {
 }
 
 void RasterizerOpenGL::SyncLogicOp() {
-    state.logic_op = PicaToGL::LogicOp(Pica::g_state.regs.output_merger.logic_op);
+    const auto& regs = Pica::g_state.regs;
+
+    if (regs.framebuffer.allow_color_read == 0x0) {
+
+        // Pretend that the destination reads always return 0
+        switch (regs.output_merger.logic_op) {
+
+        // Always 0
+        case Pica::Regs::LogicOp::Clear:
+        case Pica::Regs::LogicOp::And:
+        case Pica::Regs::LogicOp::AndInverted:
+            state.logic_op = GL_CLEAR;
+            break;
+
+        // Always s
+        case Pica::Regs::LogicOp::AndReverse:
+        case Pica::Regs::LogicOp::Copy:
+        case Pica::Regs::LogicOp::Or:
+        case Pica::Regs::LogicOp::Xor:
+            state.logic_op = GL_COPY;
+            break;
+
+        // Always 1
+        case Pica::Regs::LogicOp::Set:
+        case Pica::Regs::LogicOp::Invert:
+        case Pica::Regs::LogicOp::Nand:
+        case Pica::Regs::LogicOp::OrReverse:
+            state.logic_op = GL_SET;
+            break;
+
+        // Always ~s
+        case Pica::Regs::LogicOp::CopyInverted:
+        case Pica::Regs::LogicOp::Nor:
+        case Pica::Regs::LogicOp::Equiv:
+        case Pica::Regs::LogicOp::OrInverted:
+            state.logic_op = GL_COPY_INVERTED;
+            break;
+
+        // FIXME: Decide for one of those:
+        //a. NoOp means reading zero, writing back zero
+        //b. NoOp means not touching the framebuffer
+        case Pica::Regs::LogicOp::NoOp:
+            state.logic_op = GL_CLEAR; // a
+            state.logic_op = GL_NOOP; // b
+            break;
+
+        default:
+            LOG_CRITICAL(Render_OpenGL, "Unknown logic op %d", regs.output_merger.logic_op);
+            UNREACHABLE();
+            break;
+        }
+
+    } else {
+        state.logic_op = PicaToGL::LogicOp(regs.output_merger.logic_op);
+    }
 }
 
 void RasterizerOpenGL::SyncColorWriteMask() {
