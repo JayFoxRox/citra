@@ -67,6 +67,12 @@ enum class AppletId : u32 {
     Ed2                = 0x402,
 };
 
+enum class StartupArgumentType : u32 {
+    OtherApp   = 0x0,
+    Restart    = 0x1,
+    OtherMedia = 0x2,
+};
+
 /// Send a parameter to the currently-running application, which will read it via ReceiveParameter
 void SendParameter(const MessageParameter& parameter);
 
@@ -305,6 +311,19 @@ void SetAppCpuTimeLimit(Service::Interface* self);
  *      2 : System core CPU time percentage
  */
 void GetAppCpuTimeLimit(Service::Interface* self);
+
+/**
+ * APT:GetStartupArgument service function. There is a buffer 0x100 bytes after the command buffer
+ * which indicates the parameter size and a pointer to the parameter
+ *  Inputs:
+ *      1 : Parameter size, capped to 0x300
+ *      2 : Startup argument type
+ *  Outputs:
+ *      0 : Return header
+ *      1 : Result of function, 0 on success, otherwise error code
+ *      2 : Response status, 0 if parameter doesn't exist, 1 if it exists
+ */
+void GetStartupArgument(Service::Interface* self);
 
 /**
  * APT::PrepareToStartLibraryApplet service function

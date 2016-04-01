@@ -332,6 +332,17 @@ void GetAppCpuTimeLimit(Service::Interface* self) {
     LOG_WARNING(Service_APT, "(STUBBED) called value=%u", value);
 }
 
+void GetStartupArgument(Service::Interface* self) {
+    u32* cmd_buff = Kernel::GetCommandBuffer();
+    u32 param_size = cmd_buff[1];
+    StartupArgumentType arg_type = static_cast<StartupArgumentType>(cmd_buff[2]);
+
+    cmd_buff[1] = RESULT_SUCCESS.raw; // No error
+    cmd_buff[2] = 0; // Parameter does not exist
+
+    LOG_WARNING(Service_APT, "(STUBBED) called param_size=%u argument_type=%u", param_size, arg_type);
+}
+
 void PrepareToStartLibraryApplet(Service::Interface* self) {
     u32* cmd_buff = Kernel::GetCommandBuffer();
     AppletId applet_id = static_cast<AppletId>(cmd_buff[1]);
