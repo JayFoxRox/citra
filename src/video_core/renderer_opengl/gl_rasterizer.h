@@ -344,6 +344,15 @@ private:
     /// Syncs the logic op states to match the PICA register
     void SyncLogicOp();
 
+    /// Syncs the color write mask to match the PICA register
+    void SyncColorWriteMask();
+
+    /// Syncs the stencil write mask to match the PICA register
+    void SyncStencilWriteMask();
+
+    /// Syncs the depth write mask to match the PICA register
+    void SyncDepthWriteMask();
+
     /// Syncs the stencil test states to match the PICA register
     void SyncStencilTest();
 
