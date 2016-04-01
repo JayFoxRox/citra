@@ -35,6 +35,8 @@ struct PicaShaderConfig {
         PicaShaderConfig res;
         const auto& regs = Pica::g_state.regs;
 
+        res.depthmap_enable = regs.depthmap_enable;
+
         res.alpha_test_func = regs.output_merger.alpha_test.enable ?
             regs.output_merger.alpha_test.func.Value() : Pica::Regs::CompareFunc::Always;
 
@@ -140,6 +142,8 @@ struct PicaShaderConfig {
     bool operator ==(const PicaShaderConfig& o) const {
         return std::memcmp(this, &o, sizeof(PicaShaderConfig)) == 0;
     };
+
+    Pica::Regs::DepthBuffering depthmap_enable = Pica::Regs::DepthBuffering::WBuffering;
 
     Pica::Regs::CompareFunc alpha_test_func = Pica::Regs::CompareFunc::Never;
     std::array<Pica::Regs::TevStageConfig, 6> tev_stages = {};
@@ -303,6 +307,7 @@ private:
         GLvec4 const_color[6];
         GLvec4 tev_combiner_buffer_color;
         GLint alphatest_ref;
+        GLfloat depth_scale;
         GLfloat depth_offset;
         alignas(16) GLvec3 lighting_global_ambient;
         LightSrc light_src[8];
@@ -343,6 +348,15 @@ private:
 
     /// Syncs the logic op states to match the PICA register
     void SyncLogicOp();
+
+    /// Syncs the color write mask to match the PICA register
+    void SyncColorWriteMask();
+
+    /// Syncs the stencil write mask to match the PICA register
+    void SyncStencilWriteMask();
+
+    /// Syncs the depth write mask to match the PICA register
+    void SyncDepthWriteMask();
 
     /// Syncs the stencil test states to match the PICA register
     void SyncStencilTest();

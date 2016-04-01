@@ -560,7 +560,7 @@ static u32 vfp_double_ftoui(ARMul_State* state, int sd, int unused, int dm, u32 
     if (vdm.exponent >= 1023 + 32) {
         d = vdm.sign ? 0 : 0xffffffff;
         exceptions = FPSCR_IOC;
-    } else if (vdm.exponent >= 1023 - 1) {
+    } else if (vdm.exponent >= 1023) {
         int shift = 1023 + 63 - vdm.exponent;
         u64 rem, incr = 0;
 
@@ -644,7 +644,7 @@ static u32 vfp_double_ftosi(ARMul_State* state, int sd, int unused, int dm, u32 
         if (vdm.sign)
             d = ~d;
         exceptions |= FPSCR_IOC;
-    } else if (vdm.exponent >= 1023 - 1) {
+    } else if (vdm.exponent >= 1023) {
         int shift = 1023 + 63 - vdm.exponent;	/* 58 */
         u64 rem, incr = 0;
 

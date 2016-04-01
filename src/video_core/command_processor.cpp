@@ -23,6 +23,8 @@
 #include "video_core/debug_utils/debug_utils.h"
 #include "video_core/shader/shader_interpreter.h"
 
+#include <GL/gl.h>
+
 namespace Pica {
 
 namespace CommandProcessor {
@@ -169,6 +171,13 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
                 if (g_debug_context) {
                     g_debug_context->OnEvent(DebugContext::Event::FinishedPrimitiveBatch, nullptr);
                 }
+
+                float depth;
+                uint8_t stencil;
+                glReadPixels(regs.framebuffer.GetWidth() / 2, regs.framebuffer.GetHeight() / 2, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &depth);
+                glReadPixels(regs.framebuffer.GetWidth() / 2, regs.framebuffer.GetHeight() / 2, 1, 1, GL_STENCIL_INDEX, GL_UNSIGNED_BYTE, &stencil);
+                printf("Read depth: %f, stencil: 0x%02X\n", depth, stencil);
+
             }
             break;
 

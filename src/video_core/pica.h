@@ -69,7 +69,7 @@ struct Regs {
     INSERT_PADDING_WORDS(0x9);
 
     BitField<0, 24, u32> viewport_depth_range; // float24
-    BitField<0, 24, u32> viewport_depth_far_plane; // float24
+    BitField<0, 24, u32> viewport_depth_near_plane; // float24
 
     BitField<0, 3, u32> vs_output_total;
 
@@ -121,7 +121,20 @@ struct Regs {
         BitField<16, 10, s32> y;
     } viewport_corner;
 
-    INSERT_PADDING_WORDS(0x17);
+    INSERT_PADDING_WORDS(0x1);
+
+    //TODO: early depth
+    INSERT_PADDING_WORDS(0x1);
+
+    INSERT_PADDING_WORDS(0x2);
+
+    enum DepthBuffering : u32 {
+        WBuffering  = 0,
+        ZBuffering  = 1,
+    };
+    BitField< 0, 1, DepthBuffering> depthmap_enable;
+
+    INSERT_PADDING_WORDS(0x12);
 
     struct TextureConfig {
         enum WrapMode : u32 {
@@ -578,7 +591,25 @@ struct Regs {
     }
 
     struct {
-        INSERT_PADDING_WORDS(0x6);
+        INSERT_PADDING_WORDS(0x2);
+
+        union {
+            BitField<0, 4, u32> allow_color_read; // Allow read (0 = disable, 0xF = enable)
+        };
+
+        union {
+            BitField<0, 4, u32> allow_color_write; // Allow write (0 = disable, 0xF = enable)
+        };
+
+        union {
+            BitField<0, 1, u32> allow_stencil_read; // Allow stencil read (0 = disable, 1 = enable)
+            BitField<1, 1, u32> allow_depth_read; // Allow depth read (0 = disable, 1 = enable)
+        };
+
+        union {
+            BitField<0, 1, u32> allow_stencil_write; // Allow stencil write (0 = disable, 1 = enable)
+            BitField<1, 1, u32> allow_depth_write; // Allow depth write (0 = disable, 1 = enable)
+        };
 
         DepthFormat depth_format; // TODO: Should be a BitField!
         BitField<16, 3, ColorFormat> color_format;
@@ -1263,10 +1294,11 @@ ASSERT_REG_POSITION(cull_mode, 0x40);
 ASSERT_REG_POSITION(viewport_size_x, 0x41);
 ASSERT_REG_POSITION(viewport_size_y, 0x43);
 ASSERT_REG_POSITION(viewport_depth_range, 0x4d);
-ASSERT_REG_POSITION(viewport_depth_far_plane, 0x4e);
+ASSERT_REG_POSITION(viewport_depth_near_plane, 0x4e);
 ASSERT_REG_POSITION(vs_output_attributes[0], 0x50);
 ASSERT_REG_POSITION(vs_output_attributes[1], 0x51);
 ASSERT_REG_POSITION(viewport_corner, 0x68);
+ASSERT_REG_POSITION(depthmap_enable, 0x6D);
 ASSERT_REG_POSITION(texture0_enable, 0x80);
 ASSERT_REG_POSITION(texture0, 0x81);
 ASSERT_REG_POSITION(texture0_format, 0x8e);
