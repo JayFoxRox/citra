@@ -269,6 +269,9 @@ void RasterizerOpenGL::NotifyPicaRegisterChanged(u32 id) {
         break;
 
     // Stencil test
+    case PICA_REG_INDEX(framebuffer.depth_format):
+        SyncStencilTest();
+        break;
     case PICA_REG_INDEX(output_merger.stencil_test.raw_func):
     case PICA_REG_INDEX(output_merger.stencil_test.raw_op):
         SyncStencilTest();
