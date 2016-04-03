@@ -532,6 +532,9 @@ void GraphicsVertexShaderWidget::Reload(bool replace_vertex_data, void* vertex_d
 
     // Generate debug information using a virtual shader unit
     Pica::Shader::UnitState<true> shader_unit;
+    for (unsigned i = 0; i < ARRAY_SIZE(shader_unit.registers.temporary); i++) {
+        shader_unit.registers.temporary[i] = Pica::g_state.shader_units[3].registers.temporary[i];
+    }
     if (show_gs) {
         using Pica::Shader::OutputVertex;
         auto AddTriangle = [](
