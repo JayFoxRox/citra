@@ -713,8 +713,8 @@ void GraphicsVertexShaderWidget::OnVertexIndexChanged(int index) {
             float value = 0.0f; //FIXME: output_vertex[comp].ToFloat32();
             switch(map[comp]) {
                 case Pica::Regs::VSOutputAttributes::Semantic::POSITION_X:   name = "pos.x";   value = output_vertex.pos.x.ToFloat32(); break;
-                case Pica::Regs::VSOutputAttributes::Semantic::POSITION_Y:   name = "pos.z";   value = output_vertex.pos.y.ToFloat32(); break;
-                case Pica::Regs::VSOutputAttributes::Semantic::POSITION_Z:   name = "pos.y";   value = output_vertex.pos.z.ToFloat32(); break;
+                case Pica::Regs::VSOutputAttributes::Semantic::POSITION_Y:   name = "pos.y";   value = output_vertex.pos.y.ToFloat32(); break;
+                case Pica::Regs::VSOutputAttributes::Semantic::POSITION_Z:   name = "pos.z";   value = output_vertex.pos.z.ToFloat32(); break;
                 case Pica::Regs::VSOutputAttributes::Semantic::POSITION_W:   name = "pos.w";   value = output_vertex.pos.w.ToFloat32(); break;
                 //FIXME: all of those
                 case Pica::Regs::VSOutputAttributes::Semantic::QUATERNION_X: name = "quat.x";  break;
@@ -735,7 +735,7 @@ void GraphicsVertexShaderWidget::OnVertexIndexChanged(int index) {
                 case Pica::Regs::VSOutputAttributes::Semantic::TEXCOORD2_U:  name = "tc2.u";   break;
                 case Pica::Regs::VSOutputAttributes::Semantic::TEXCOORD2_V:  name = "tc2.v";   break;
                 default:
-                    name = std::string("Unknown[0x") + std::to_string(map[comp]) + std::string("]");
+                    name = std::string("Unknown[") + std::to_string(map[comp]) + std::string("]");
                     break;
             }
             used = true;
