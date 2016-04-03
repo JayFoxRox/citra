@@ -686,14 +686,20 @@ void GraphicsVertexShaderWidget::OnVertexIndexChanged(int index) {
     auto& output_vertex = output_vertices[index];
 
     // Reload widget state
-    for (int i = 0; i < 7; ++i) {
+    unsigned int enabled_output_index = 0;
+    for (int i = 0; i < 16; ++i) {
 
-        //FIXME: Respect output map!
+        if (enabled_output_index >= Pica::g_state.regs.vs_output_total)
+            break;
+
+        //FIXME: GS support!
+        if ((Pica::g_state.regs.vs.output_mask & (1 << i)) == 0)
+            continue;
 
         bool used = false;
         std::string mapping = std::string("-> ");
 
-        auto& output = Pica::g_state.regs.vs_output_attributes[i];
+        auto& output = Pica::g_state.regs.vs_output_attributes[enabled_output_index];
         Pica::Regs::VSOutputAttributes::Semantic map[] = {
             output.map_x.Value(), output.map_y.Value(), output.map_z.Value(), output.map_w.Value()
         };
@@ -736,7 +742,9 @@ void GraphicsVertexShaderWidget::OnVertexIndexChanged(int index) {
             // TODO: Check if we can and have to update this
             mapping += std::string("{ ") + std::string(1, "xyzw"[comp]) + std::string(": ") + name + std::string(" = ") + std::to_string(value) + std::string(" }");
         }
-        output_data_mapping[i]->setText(QString::fromStdString(mapping));
-        output_data_container[i]->setVisible(used);
+        output_data_mapping[enabled_output_index]->setText(QString::fromStdString(mapping));
+        output_data_container[enabled_output_index]->setVisible(used);
+
+        enabled_output_index++;
     }
 }
