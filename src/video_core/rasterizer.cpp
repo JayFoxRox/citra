@@ -252,39 +252,17 @@ static u8 PerformStencilAction(Regs::StencilAction action, u8 old_stencil, u8 re
     }
 }
 
-// NOTE: Assuming that rasterizer coordinates are 12.4 fixed-point values
-struct Fix12P4 {
-    Fix12P4() {}
-    Fix12P4(u16 val) : val(val) {}
-
-    static u16 FracMask() { return 0xF; }
-    static u16 IntMask() { return (u16)~0xF; }
-
-    operator u16() const {
-        return val;
-    }
-
-    bool operator < (const Fix12P4& oth) const {
-        return (u16)*this < (u16)oth;
-    }
-
-private:
-    u16 val;
-};
-
 /**
- * Calculate signed area of the triangle spanned by the three argument vertices.
+ * Calculate signed area of the triangle spanned by 2 edges.
  * The sign denotes an orientation.
  *
  * @todo define orientation concretely.
  */
-static int SignedArea (const Math::Vec2<Fix12P4>& vtx1,
-                       const Math::Vec2<Fix12P4>& vtx2,
-                       const Math::Vec2<Fix12P4>& vtx3) {
-    const auto vec1 = Math::MakeVec(vtx2 - vtx1, 0);
-    const auto vec2 = Math::MakeVec(vtx3 - vtx1, 0);
+//FIXME: Do a precalc for vtx1 and vtx2
+static int SignedArea (const Math::Vec2<fixedS28P4>& e1,
+                       const Math::Vec2<fixedS28P4>& e2) {
     // TODO: There is a very small chance this will overflow for sizeof(int) == 4
-    return Math::Cross(vec1, vec2).z;
+    return (int)e1.x.ToRaw() * (int)e2.y.ToRaw() - (int)e1.y.ToRaw() * (int)e2.x.ToRaw();
 };
 
 static Common::Profiling::TimingCategory rasterization_category("Rasterization");
@@ -300,6 +278,7 @@ static void ProcessTriangleInternal(const Shader::OutputVertex& v0,
                                     bool reversed = false)
 {
     const auto& regs = g_state.regs;
+    const auto& framebuffer = regs.framebuffer;
     Common::Profiling::ScopeTimer timer(rasterization_category);
     MICROPROFILE_SCOPE(GPU_Rasterization);
 
@@ -307,19 +286,24 @@ static void ProcessTriangleInternal(const Shader::OutputVertex& v0,
     static auto FloatToFix = [](float24 flt) {
         // TODO: Rounding here is necessary to prevent garbage pixels at
         //       triangle borders. Is it that the correct solution, though?
-        return Fix12P4(static_cast<unsigned short>(round(flt.ToFloat32() * 16.0f)));
+        return fixedS28P4::FromFloat32(flt.ToFloat32());
     };
     static auto ScreenToRasterizerCoordinates = [](const Math::Vec3<float24>& vec) {
-        return Math::Vec3<Fix12P4>{FloatToFix(vec.x), FloatToFix(vec.y), FloatToFix(vec.z)};
+        return Math::Vec3<fixedS28P4>{FloatToFix(vec.x), FloatToFix(vec.y), FloatToFix(vec.z)};
     };
 
-    Math::Vec3<Fix12P4> vtxpos[3]{ ScreenToRasterizerCoordinates(v0.screenpos),
-                                   ScreenToRasterizerCoordinates(v1.screenpos),
-                                   ScreenToRasterizerCoordinates(v2.screenpos) };
+    Math::Vec3<fixedS28P4> vtxpos[3]{ ScreenToRasterizerCoordinates(v0.screenpos),
+                                      ScreenToRasterizerCoordinates(v1.screenpos),
+                                      ScreenToRasterizerCoordinates(v2.screenpos) };
+
+    // Deltas
+    auto d21 = vtxpos[2].xy() - vtxpos[1].xy();
+    auto d02 = vtxpos[0].xy() - vtxpos[2].xy();
+    auto d10 = vtxpos[1].xy() - vtxpos[0].xy();
 
     if (regs.cull_mode == Regs::CullMode::KeepAll) {
         // Make sure we always end up with a triangle wound counter-clockwise
-        if (!reversed && SignedArea(vtxpos[0].xy(), vtxpos[1].xy(), vtxpos[2].xy()) <= 0) {
+        if (!reversed && SignedArea(d10, d02) >= 0) {
             ProcessTriangleInternal(v0, v2, v1, true);
             return;
         }
@@ -331,41 +315,62 @@ static void ProcessTriangleInternal(const Shader::OutputVertex& v0,
         }
 
         // Cull away triangles which are wound clockwise.
-        if (SignedArea(vtxpos[0].xy(), vtxpos[1].xy(), vtxpos[2].xy()) <= 0)
+        if (SignedArea(d10, d02) >= 0)
             return;
     }
 
     // TODO: Proper scissor rect test!
-    u16 min_x = std::min({vtxpos[0].x, vtxpos[1].x, vtxpos[2].x});
-    u16 min_y = std::min({vtxpos[0].y, vtxpos[1].y, vtxpos[2].y});
-    u16 max_x = std::max({vtxpos[0].x, vtxpos[1].x, vtxpos[2].x});
-    u16 max_y = std::max({vtxpos[0].y, vtxpos[1].y, vtxpos[2].y});
+    auto min_x = std::min({vtxpos[0].x, vtxpos[1].x, vtxpos[2].x});
+    auto min_y = std::min({vtxpos[0].y, vtxpos[1].y, vtxpos[2].y});
+    auto max_x = std::max({vtxpos[0].x, vtxpos[1].x, vtxpos[2].x});
+    auto max_y = std::max({vtxpos[0].y, vtxpos[1].y, vtxpos[2].y});
 
-    min_x &= Fix12P4::IntMask();
-    min_y &= Fix12P4::IntMask();
-    max_x = ((max_x + Fix12P4::FracMask()) & Fix12P4::IntMask());
-    max_y = ((max_y + Fix12P4::FracMask()) & Fix12P4::IntMask());
+    // Rounding helpers
+    auto RoundUp = [](fixedS28P4 value) {
+        auto frac_mask = fixedS28P4::FromRaw(fixedS28P4::FracMask());
+        return fixedS28P4::FromFixed((value + frac_mask).Int());
+    };
+    auto RoundDown = [](fixedS28P4 value) {
+        return fixedS28P4::FromFixed(value.Int());
+    };
+
+    // Floor min_x and min_y, ceil max_x and max_y for the bounding box
+    min_x = RoundDown(min_x);
+    min_y = RoundDown(min_y);
+    max_x = RoundUp(max_x);
+    max_y = RoundUp(max_y);
+
+    // Clamp to framebuffer
+    min_x = std::max(min_x, fixedS28P4::Zero());
+    min_y = std::max(min_y, fixedS28P4::Zero());
+    max_x = std::min(max_x, fixedS28P4::FromFixed(framebuffer.GetWidth()));
+    max_y = std::min(max_y, fixedS28P4::FromFixed(framebuffer.GetHeight()));
 
     // Triangle filling rules: Pixels on the right-sided edge or on flat bottom edges are not
     // drawn. Pixels on any other triangle border are drawn. This is implemented with three bias
     // values which are added to the barycentric coordinates w0, w1 and w2, respectively.
     // NOTE: These are the PSP filling rules. Not sure if the 3DS uses the same ones...
-    auto IsRightSideOrFlatBottomEdge = [](const Math::Vec2<Fix12P4>& vtx,
-                                          const Math::Vec2<Fix12P4>& line1,
-                                          const Math::Vec2<Fix12P4>& line2)
+    auto IsRightSideOrFlatBottomEdge = [](const Math::Vec2<fixedS28P4>& point,
+                                          const Math::Vec2<fixedS28P4>& line)
     {
-        if (line1.y == line2.y) {
+        if (line.y == fixedS28P4::Zero()) {
             // just check if vertex is above us => bottom line parallel to x-axis
-            return vtx.y < line1.y;
+            return point.y < fixedS28P4::Zero();
         } else {
             // check if vertex is on our left => right side
-            // TODO: Not sure how likely this is to overflow
-            return (int)vtx.x < (int)line1.x + ((int)line2.x - (int)line1.x) * ((int)vtx.y - (int)line1.y) / ((int)line2.y - (int)line1.y);
+            // We do math on the raw fixed point representation to avoid overflows.
+            s64 line_x = (s64)line.x.ToRaw();
+            s64 line_y = (s64)line.y.ToRaw();
+            s64 point_x = (s64)point.x.ToRaw();
+            s64 point_y = (s64)point.y.ToRaw();
+            // The '*' and '/' cancel each other out so we don't have to shift in these fixed point operations.
+            return point_x < line_x + point_y * line_x / line_y;
         }
     };
-    int bias0 = IsRightSideOrFlatBottomEdge(vtxpos[0].xy(), vtxpos[1].xy(), vtxpos[2].xy()) ? -1 : 0;
-    int bias1 = IsRightSideOrFlatBottomEdge(vtxpos[1].xy(), vtxpos[2].xy(), vtxpos[0].xy()) ? -1 : 0;
-    int bias2 = IsRightSideOrFlatBottomEdge(vtxpos[2].xy(), vtxpos[0].xy(), vtxpos[1].xy()) ? -1 : 0;
+
+    auto bias0 = IsRightSideOrFlatBottomEdge(d10, d21) ? -1 : 0;
+    auto bias1 = IsRightSideOrFlatBottomEdge(d21, d02) ? -1 : 0;
+    auto bias2 = IsRightSideOrFlatBottomEdge(d02, d10) ? -1 : 0;
 
     auto w_inverse = Math::MakeVec(v0.pos.w, v1.pos.w, v2.pos.w);
 
@@ -377,13 +382,21 @@ static void ProcessTriangleInternal(const Shader::OutputVertex& v0,
 
     // Enter rasterization loop, starting at the center of the topleft bounding box corner.
     // TODO: Not sure if looping through x first might be faster
-    for (u16 y = min_y + 8; y < max_y; y += 0x10) {
-        for (u16 x = min_x + 8; x < max_x; x += 0x10) {
+    auto pixel = fixedS28P4::FromFixed(1);
+    auto half_pixel = pixel / fixedS28P4::FromFixed(2);
+    for (auto y = min_y + half_pixel; y < max_y; y += pixel) {
+        for (auto x = min_x + half_pixel; x < max_x; x += pixel) {
+
+            Math::Vec2<fixedS28P4> xy = Math::MakeVec(x, y);
+
+            auto dp0 = xy - vtxpos[0].xy();
+            auto dp1 = xy - vtxpos[1].xy();
+            auto dp2 = xy - vtxpos[2].xy();
 
             // Calculate the barycentric coordinates w0, w1 and w2
-            int w0 = bias0 + SignedArea(vtxpos[1].xy(), vtxpos[2].xy(), {x, y});
-            int w1 = bias1 + SignedArea(vtxpos[2].xy(), vtxpos[0].xy(), {x, y});
-            int w2 = bias2 + SignedArea(vtxpos[0].xy(), vtxpos[1].xy(), {x, y});
+            int w0 = SignedArea(d21, dp2) + bias0;
+            int w1 = SignedArea(d02, dp0) + bias1;
+            int w2 = SignedArea(d10, dp1) + bias2;
             int wsum = w0 + w1 + w2;
 
             // If current pixel is not covered by the current primitive
@@ -391,8 +404,8 @@ static void ProcessTriangleInternal(const Shader::OutputVertex& v0,
                 continue;
 
             auto baricentric_coordinates = Math::MakeVec(float24::FromFloat32(static_cast<float>(w0)),
-                                                float24::FromFloat32(static_cast<float>(w1)),
-                                                float24::FromFloat32(static_cast<float>(w2)));
+                                                         float24::FromFloat32(static_cast<float>(w1)),
+                                                         float24::FromFloat32(static_cast<float>(w2)));
             float24 interpolated_w_inverse = float24::FromFloat32(1.0f) / Math::Dot(w_inverse, baricentric_coordinates);
 
             // Perspective correct attribute interpolation:
@@ -809,11 +822,11 @@ static void ProcessTriangleInternal(const Shader::OutputVertex& v0,
 
             auto UpdateStencil = [stencil_test, x, y, &old_stencil](Pica::Regs::StencilAction action) {
                 u8 new_stencil = PerformStencilAction(action, old_stencil, stencil_test.reference_value);
-                SetStencil(x >> 4, y >> 4, (new_stencil & stencil_test.write_mask) | (old_stencil & ~stencil_test.write_mask));
+                SetStencil(x.Int(), y.Int(), (new_stencil & stencil_test.write_mask) | (old_stencil & ~stencil_test.write_mask));
             };
 
             if (stencil_action_enable) {
-                old_stencil = GetStencil(x >> 4, y >> 4);
+                old_stencil = GetStencil(x.Int(), y.Int());
                 u8 dest = old_stencil & stencil_test.input_mask;
                 u8 ref = stencil_test.reference_value & stencil_test.input_mask;
 
@@ -864,7 +877,7 @@ static void ProcessTriangleInternal(const Shader::OutputVertex& v0,
                            v2.screenpos[2].ToFloat32() * w2) * ((1 << num_bits) - 1) / wsum);
 
             if (output_merger.depth_test_enable) {
-                u32 ref_z = GetDepth(x >> 4, y >> 4);
+                u32 ref_z = GetDepth(x.Int(), y.Int());
 
                 bool pass = false;
 
@@ -910,13 +923,13 @@ static void ProcessTriangleInternal(const Shader::OutputVertex& v0,
             }
 
             if (output_merger.depth_write_enable)
-                SetDepth(x >> 4, y >> 4, z);
+                SetDepth(x.Int(), y.Int(), z);
 
             // The stencil depth_pass action is executed even if depth testing is disabled
             if (stencil_action_enable)
                 UpdateStencil(stencil_test.action_depth_pass);
 
-            auto dest = GetPixel(x >> 4, y >> 4);
+            auto dest = GetPixel(x.Int(), y.Int());
             Math::Vec4<u8> blend_output = combiner_output;
 
             if (output_merger.alphablend_enable) {
@@ -1133,7 +1146,7 @@ static void ProcessTriangleInternal(const Shader::OutputVertex& v0,
                 output_merger.alpha_enable ? blend_output.a() : dest.a()
             };
 
-            DrawPixel(x >> 4, y >> 4, result);
+            DrawPixel(x.Int(), y.Int(), result);
         }
     }
 }

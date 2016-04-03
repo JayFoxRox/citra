@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <cmath>
 #include <cstring>
 
 #include "common/common_types.h"
@@ -142,5 +143,143 @@ private:
 using float24 = Float<16, 7>;
 using float20 = Float<12, 7>;
 using float16 = Float<10, 5>;
+
+/**
+ * Template class for handling arbitrary Pica fixed point types
+ */
+template<unsigned I, unsigned F, typename T>
+struct Fixed {
+
+static_assert(std::numeric_limits<T>::is_integer, "T must be an integer type");
+using U = typename std::make_unsigned<T>::type;
+
+public:
+
+    static Fixed<I, F, T> FromRaw(T hex) {
+        Fixed<I, F, T> ret;
+        //TODO: Sign extend if the sign is too short?
+        ret.value = hex;
+        return ret;
+    }
+
+    static Fixed<I, F, T> FromFixed(T i, U f = 0U) {
+        return FromRaw(((i << F) & ~FRAC_MASK) | (f & FRAC_MASK));
+    }
+
+    static Fixed<I, F, T> FromFloat32(float val) {
+        return FromRaw((T)roundf(val * (float)(1 << F)));
+    }
+
+    static Fixed<I, F, T> Zero() {
+        return FromRaw(0);
+    }
+
+    float ToFloat32() const {
+        //FIXME: Handle signed case!
+        float value = Int() + Fract() / (float)FRAC_MASK;
+        return value;
+    }
+
+    T ToRaw() const {
+        return value;
+    }
+
+    U Fract() const {
+        return fracpart;
+    }
+
+    T Int() const {
+        return intpart;
+    }
+
+    static U FracMask() {
+        return FRAC_MASK;
+    }
+
+    static U IntMask() {
+        return INT_MASK << F;
+    }
+
+    Fixed<I, F, T> operator = (const Fixed<I, F, T>& fxd) const {
+        return FromRaw(fxd.value);
+    }
+
+    Fixed<I, F, T> operator * (const Fixed<I, F, T>& fxd) const {
+        return FromRaw((value * fxd.value) >> F);
+    }
+
+    Fixed<I, F, T> operator / (const Fixed<I, F, T>& fxd) const {
+        return FromRaw((value << F) / fxd.value);
+    }
+
+    Fixed<I, F, T> operator + (const Fixed<I, F, T>& fxd) const {
+        return FromRaw(value + fxd.value);
+    }
+
+    Fixed<I, F, T> operator - (const Fixed<I, F, T>& fxd) const {
+        return FromRaw(value - fxd.value);
+    }
+
+    Fixed<I, F, T>& operator *= (const Fixed<I, F, T>& fxd) {
+        value = (value * fxd.value) >> F;
+        return *this;
+    }
+
+    Fixed<I, F, T>& operator /= (Fixed<I, F, T>& fxd) {
+        value = (value << F) / fxd.value;
+        return *this;
+    }
+
+    Fixed<I, F, T>& operator += (Fixed<I, F, T>& fxd) {
+        value += fxd.value;
+        return *this;
+    }
+
+    Fixed<I, F, T>& operator -= (Fixed<I, F, T>& fxd) {
+        value -= fxd.value;
+        return *this;
+    }
+
+    Fixed<I, F, T> operator - () const {
+        return FromRaw(-value);
+    }
+
+    bool operator < (const Fixed<I, F, T>& fxd) const {
+        return value < fxd.value;
+    }
+
+    bool operator > (const Fixed<I, F, T>& fxd) const {
+        return value > fxd.value;
+    }
+
+    bool operator >= (const Fixed<I, F, T>& fxd) const {
+        return value >= fxd.value;
+    }
+
+    bool operator <= (const Fixed<I, F, T>& fxd) const {
+        return value <= fxd.value;
+    }
+
+    bool operator == (const Fixed<I, F, T>& fxd) const {
+        return value == fxd.value;
+    }
+
+    bool operator != (const Fixed<I, F, T>& fxd) const {
+        return value != fxd.value;
+    }
+
+private:
+    static const U MASK = (1 << (I + F)) - 1U;
+    static const U INT_MASK = (1 << I) - 1U;
+    static const U FRAC_MASK = (1 << F) - 1U;
+
+    union {
+        T value;
+        BitField<F,I,T> intpart;
+        BitField<0,F,U> fracpart;
+    };
+};
+
+using fixedS28P4 = Fixed<28, 4, s32>;
 
 } // namespace Pica
