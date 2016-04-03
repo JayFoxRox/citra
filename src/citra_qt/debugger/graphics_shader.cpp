@@ -12,11 +12,12 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QRadioButton>
 #include <QSignalMapper>
 #include <QSpinBox>
 #include <QTreeView>
 
-#include "citra_qt/debugger/graphics_vertex_shader.h"
+#include "citra_qt/debugger/graphics_shader.h"
 #include "citra_qt/util/util.h"
 
 #include "video_core/pica.h"
@@ -347,8 +348,8 @@ void GraphicsVertexShaderWidget::DumpShader() {
 
 GraphicsVertexShaderWidget::GraphicsVertexShaderWidget(std::shared_ptr< Pica::DebugContext > debug_context,
                                                        QWidget* parent)
-        : BreakPointObserverDock(debug_context, "Pica Vertex Shader", parent) {
-    setObjectName("PicaVertexShader");
+        : BreakPointObserverDock(debug_context, "Pica Shader Units", parent) {
+    setObjectName("PicaShaderUnits");
 
     // Clear input vertex data so that it contains valid float values in case a debug shader
     // execution happens before the first Vertex Loaded breakpoint.
@@ -365,7 +366,7 @@ GraphicsVertexShaderWidget::GraphicsVertexShaderWidget(std::shared_ptr< Pica::De
         input_data[i]->setValidator(new QDoubleValidator(input_data[i]));
     }
 
-    breakpoint_warning = new QLabel(tr("(data only available at vertex shader invocation breakpoints)"));
+    breakpoint_warning = new QLabel(tr("(data only available at shader invocation breakpoints)"));
 
     // TODO: Add some button for jumping to the shader entry point
 
@@ -421,6 +422,21 @@ GraphicsVertexShaderWidget::GraphicsVertexShaderWidget(std::shared_ptr< Pica::De
             sub_layout->addWidget(input_data_container[i]);
         }
 
+        auto shader_unit_group = new QGroupBox(tr("Shader Unit"));
+        {
+            auto row_layout = new QHBoxLayout;
+            for (unsigned i = 0; i < 4; ++i) {
+                // Create an HBoxLayout to store the widgets used to specify a particular attribute
+                // and store it in a QWidget to allow for easy hiding and unhiding.
+                row_layout->setContentsMargins(0, 0, 0, 0);
+                row_layout->addWidget(new QRadioButton(tr("Unit %1").arg(i, 1)));
+            }
+            row_layout->addWidget(new QRadioButton(tr("Active (None)")));
+            shader_unit_group->setLayout(row_layout);
+        }
+
+        main_layout->addWidget(shader_unit_group);
+
         sub_layout->addWidget(breakpoint_warning);
         breakpoint_warning->hide();
 
@@ -454,7 +470,7 @@ GraphicsVertexShaderWidget::GraphicsVertexShaderWidget(std::shared_ptr< Pica::De
 
 void GraphicsVertexShaderWidget::OnBreakPointHit(Pica::DebugContext::Event event, void* data) {
     auto input = static_cast<Pica::Shader::InputVertex*>(data);
-    if (event == Pica::DebugContext::Event::VertexShaderInvocation) {
+    if (event == Pica::DebugContext::Event::VertexShaderInvocation || event == Pica::DebugContext::Event::GeometryShaderInvocation) {
         Reload(true, data);
     } else {
         // No vertex data is retrievable => invalidate currently stored vertex data
@@ -488,8 +504,10 @@ void GraphicsVertexShaderWidget::Reload(bool replace_vertex_data, void* vertex_d
     // Reload shader code
     info.Clear();
 
-    auto& shader_setup = Pica::g_state.vs;
-    auto& shader_config = Pica::g_state.regs.vs;
+    bool show_gs = true;
+
+    auto& shader_setup = show_gs ? Pica::g_state.gs : Pica::g_state.vs;
+    auto& shader_config = show_gs ? Pica::g_state.regs.gs : Pica::g_state.regs.vs;
     for (auto instr : shader_setup.program_code)
         info.code.push_back({instr});
     int num_attributes = Pica::g_state.regs.vertex_attributes.GetNumTotalAttributes();
@@ -497,11 +515,20 @@ void GraphicsVertexShaderWidget::Reload(bool replace_vertex_data, void* vertex_d
     for (auto pattern : shader_setup.swizzle_data)
         info.swizzle_info.push_back({pattern});
 
-    u32 entry_point = Pica::g_state.regs.vs.main_offset;
+    u32 entry_point = shader_config.main_offset;
     info.labels.insert({ entry_point, "main" });
 
-    // Generate debug information
-    debug_data = Pica::g_state.vs.ProduceDebugInfo(input_vertex, num_attributes, shader_config);
+    // Generate debug information using a virtual shader unit
+    Pica::Shader::UnitState<true> shader_unit;
+    if (show_gs) {
+        using Pica::Shader::OutputVertex;
+        auto AddTriangle = [](
+            const OutputVertex& v0, const OutputVertex& v1, const OutputVertex& v2) {
+            //TODO: Do cool stuff
+        };
+        shader_unit.emit_triangle_callback = AddTriangle;
+    }
+    debug_data = shader_setup.ProduceDebugInfo(shader_unit, input_vertex, num_attributes, shader_config);
 
     // Reload widget state
     for (int attr = 0; attr < num_attributes; ++attr) {

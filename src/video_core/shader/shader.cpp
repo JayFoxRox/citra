@@ -142,8 +142,7 @@ void ShaderSetup::Run(UnitState<false>& state, const InputVertex& input, int num
 
 }
 
-DebugData<true> ShaderSetup::ProduceDebugInfo(const InputVertex& input, int num_attributes, const Regs::ShaderConfig& config) {
-    UnitState<true> state;
+DebugData<true> ShaderSetup::ProduceDebugInfo(UnitState<true>& state, const InputVertex& input, int num_attributes, const Regs::ShaderConfig& config) {
 
     state.debug.max_offset = 0;
     state.debug.max_opdesc_id = 0;

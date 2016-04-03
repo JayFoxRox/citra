@@ -13,7 +13,7 @@ set(SRCS
             debugger/graphics_cmdlists.cpp
             debugger/graphics_framebuffer.cpp
             debugger/graphics_tracing.cpp
-            debugger/graphics_vertex_shader.cpp
+            debugger/graphics_shader.cpp
             debugger/profiler.cpp
             debugger/ramview.cpp
             debugger/registers.cpp
@@ -44,7 +44,7 @@ set(HEADERS
             debugger/graphics_cmdlists.h
             debugger/graphics_framebuffer.h
             debugger/graphics_tracing.h
-            debugger/graphics_vertex_shader.h
+            debugger/graphics_shader.h
             debugger/profiler.h
             debugger/ramview.h
             debugger/registers.h

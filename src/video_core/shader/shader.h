@@ -398,12 +398,13 @@ struct ShaderSetup {
 
     /**
      * Produce debug information based on the given shader and input vertex
+     * @param state Shader unit state, must be setup per shader and per shader unit
      * @param input Input vertex into the shader
      * @param num_attributes The number of vertex shader attributes
      * @param config Configuration object for the shader pipeline
      * @return Debug information for this shader with regards to the given vertex
      */
-    DebugData<true> ProduceDebugInfo(const InputVertex& input, int num_attributes, const Regs::ShaderConfig& config);
+    DebugData<true> ProduceDebugInfo(UnitState<true>& state, const InputVertex& input, int num_attributes, const Regs::ShaderConfig& config);
 
 };
 

@@ -31,7 +31,7 @@
 #include "citra_qt/debugger/graphics_cmdlists.h"
 #include "citra_qt/debugger/graphics_framebuffer.h"
 #include "citra_qt/debugger/graphics_tracing.h"
-#include "citra_qt/debugger/graphics_vertex_shader.h"
+#include "citra_qt/debugger/graphics_shader.h"
 #include "citra_qt/debugger/profiler.h"
 #include "citra_qt/debugger/ramview.h"
 #include "citra_qt/debugger/registers.h"
