@@ -286,7 +286,19 @@ QVariant GraphicsVertexShaderModel::data(const QModelIndex& index, int role) con
             }
 
             default:
-                output << " (unknown instruction format)";
+
+                switch (opcode.EffectiveOpCode()) {
+                case OpCode::Id::SETEMIT:
+                    output << " ("
+                           << "vertex_id: " << instr.setemit.vertex_id << "; "
+                           << "prim_emit: " << (instr.setemit.prim_emit ? "yes" : "no") << "; "
+                           << "winding: " << (instr.setemit.winding ? "ccw" : "cw") << ")"; //FIXME: Is this the correct way around?
+                    break;
+
+                default:
+                    output << " (unknown instruction format)";
+                    break;
+                }
                 break;
             }
 
