@@ -50,6 +50,7 @@ private slots:
     void OnInputAttributeChanged(int index);
 
     void OnCycleIndexChanged(int index);
+    void OnVertexIndexChanged(int index);
 
     void DumpShader();
 
@@ -76,11 +77,16 @@ private:
     // Text to be shown when input vertex data is not retrievable
     QLabel* breakpoint_warning;
 
+    // Text to be shown when output vertex data does not exist
+    QLabel* no_output_vertices_warning;
+
     QSpinBox* cycle_index;
+    QSpinBox* vertex_index;
 
     nihstro::ShaderInfo info;
     Pica::Shader::DebugData<true> debug_data;
     Pica::Shader::InputVertex input_vertex;
+    std::vector<Pica::Shader::OutputVertex> output_vertices;
 
     friend class GraphicsVertexShaderModel;
 };
