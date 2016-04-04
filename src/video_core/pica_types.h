@@ -150,7 +150,7 @@ using float16 = Float<10, 5>;
 template<unsigned I, unsigned F, typename T>
 struct Fixed {
 
-static_assert(std::numeric_limits<T>::is_integer, "T must be an integer type");
+static_assert(std::is_integral<T>::value, "T must be an integer type");
 using U = typename std::make_unsigned<T>::type;
 
 public:
@@ -158,6 +158,7 @@ public:
     static Fixed<I, F, T> FromRaw(T hex) {
         Fixed<I, F, T> ret;
         //TODO: Sign extend if the sign is too short?
+        //FIXME: Apply mask
         ret.value = hex;
         return ret;
     }
@@ -175,9 +176,7 @@ public:
     }
 
     float ToFloat32() const {
-        //FIXME: Handle signed case!
-        float value = Int() + Fract() / (float)FRAC_MASK;
-        return value;
+        return value / (float)(1 << F);
     }
 
     T ToRaw() const {
@@ -185,11 +184,11 @@ public:
     }
 
     U Fract() const {
-        return fracpart;
+        return value & FRAC_MASK;
     }
 
     T Int() const {
-        return intpart;
+        return (value >> F) & INT_MASK;
     }
 
     static U FracMask() {
@@ -199,11 +198,11 @@ public:
     static U IntMask() {
         return INT_MASK << F;
     }
-
+#if 0
     Fixed<I, F, T> operator = (const Fixed<I, F, T>& fxd) const {
         return FromRaw(fxd.ToRaw());
     }
-
+#endif
     Fixed<I, F, T> operator * (const Fixed<I, F, T>& fxd) const {
         return FromRaw((value * fxd.value) >> F);
     }
@@ -273,11 +272,7 @@ private:
     static const U INT_MASK = (1 << I) - 1U;
     static const U FRAC_MASK = (1 << F) - 1U;
 
-    union {
-        T value;
-        BitField<F,I,T> intpart;
-        BitField<0,F,U> fracpart;
-    };
+    T value;
 };
 
 using fixedS28P4 = Fixed<28, 4, s32>;

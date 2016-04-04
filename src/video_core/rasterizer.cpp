@@ -252,22 +252,13 @@ static u8 PerformStencilAction(Regs::StencilAction action, u8 old_stencil, u8 re
     }
 }
 
-/**
- * Calculate signed area of the triangle spanned by 2 edges.
- * The sign denotes an orientation.
- *
- * @todo define orientation concretely.
- */
-static int SignedArea (const Math::Vec2<fixedS28P4>& e1,
-                       const Math::Vec2<fixedS28P4>& e2) {
-    // Essentially the last row of a cross-product
-    return (s64)e1.x.ToRaw() * (s64)e2.y.ToRaw() - (s64)e1.y.ToRaw() * (s64)e2.x.ToRaw();
-};
+//FIXME: Move to class RasterizerSetup
+static inline void Setup() {
 
-static Common::Profiling::TimingCategory rasterization_category("Rasterization");
-MICROPROFILE_DEFINE(GPU_Rasterization, "GPU", "Rasterization", MP_RGB(50, 50, 240));
+}
 
-static inline void ProcessPixel(const Math::Vec2<fixedS28P4>& p, const Math::Vec3<float24>& baricentric_coordinates,
+static inline void ProcessPixel(const Math::Vec2<fixedS28P4>& p,
+                                int w0, int w1, int w2,
                                 const Shader::OutputVertex& v0,
                                 const Shader::OutputVertex& v1,
                                 const Shader::OutputVertex& v2) {
@@ -282,7 +273,11 @@ static inline void ProcessPixel(const Math::Vec2<fixedS28P4>& p, const Math::Vec
 
     auto w_inverse = Math::MakeVec(v0.pos.w, v1.pos.w, v2.pos.w);
 
-    float24 interpolated_w_inverse = float24::FromFloat32(1.0f) / Math::Dot(w_inverse, baricentric_coordinates);
+    auto barycentric_coordinates = Math::MakeVec(float24::FromFloat32(static_cast<float>(w0)),
+                                                 float24::FromFloat32(static_cast<float>(w1)),
+                                                 float24::FromFloat32(static_cast<float>(w2)));
+
+    float24 interpolated_w_inverse = float24::FromFloat32(1.0f) / Math::Dot(w_inverse, barycentric_coordinates);
 
     // Perspective correct attribute interpolation:
     // Attribute values cannot be calculated by simple linear interpolation since
@@ -298,10 +293,10 @@ static inline void ProcessPixel(const Math::Vec2<fixedS28P4>& p, const Math::Vec
     //     one_over_w = (( 1/v0.pos.w)*w0 + ( 1/v1.pos.w)*w1)/(w0+w1)
     //     u = u_over_w / one_over_w
     //
-    // The generalization to three vertices is straightforward in baricentric coordinates.
+    // The generalization to three vertices is straightforward in barycentric coordinates.
     auto GetInterpolatedAttribute = [&](float24 attr0, float24 attr1, float24 attr2) {
         auto attr_over_w = Math::MakeVec(attr0, attr1, attr2);
-        float24 interpolated_attr_over_w = Math::Dot(attr_over_w, baricentric_coordinates);
+        float24 interpolated_attr_over_w = Math::Dot(attr_over_w, barycentric_coordinates);
         return interpolated_attr_over_w * interpolated_w_inverse;
     };
 
@@ -319,6 +314,14 @@ static inline void ProcessPixel(const Math::Vec2<fixedS28P4>& p, const Math::Vec
     uv[1].v() = GetInterpolatedAttribute(v0.tc1.v(), v1.tc1.v(), v2.tc1.v());
     uv[2].u() = GetInterpolatedAttribute(v0.tc2.u(), v1.tc2.u(), v2.tc2.u());
     uv[2].v() = GetInterpolatedAttribute(v0.tc2.v(), v1.tc2.v(), v2.tc2.v());
+
+#if 0
+printf("tc: %d %d. %f %f\n",p.x.Int(), p.y.Int(), uv[0].u().ToFloat32(),uv[0].v().ToFloat32());
+DrawPixel(p.x.Int(),p.y.Int(),Math::MakeVec((u8)(uv[0].u().ToFloat32()*255),
+                                            (u8)(uv[0].v().ToFloat32()*255),
+                                            (u8)0, (u8)255));
+return;
+#endif
 
     Math::Vec4<u8> texture_color[3]{};
     for (int i = 0; i < 3; ++i) {
@@ -379,6 +382,12 @@ static inline void ProcessPixel(const Math::Vec2<fixedS28P4>& p, const Math::Vec
 #endif
         }
     }
+
+#if 0
+//FIXME: This is a hack to test drawing speed
+DrawPixel(p.x.Int(), p.y.Int(), texture_color[0]);
+return;
+#endif
 
     // Texture environment - consists of 6 stages of color and alpha combining.
     //
@@ -748,10 +757,7 @@ static inline void ProcessPixel(const Math::Vec2<fixedS28P4>& p, const Math::Vec
     }
 
     unsigned num_bits = Regs::DepthBitsPerPixel(regs.framebuffer.depth_format);
-    float w0 = baricentric_coordinates.x.ToFloat32();
-    float w1 = baricentric_coordinates.y.ToFloat32();
-    float w2 = baricentric_coordinates.z.ToFloat32();
-    float wsum = w0 + w1 + w2;
+    int wsum = w0 + w1 + w2;
     u32 z = (u32)((v0.screenpos[2].ToFloat32() * w0 +
                    v1.screenpos[2].ToFloat32() * w1 +
                    v2.screenpos[2].ToFloat32() * w2) * ((1 << num_bits) - 1) / wsum);
@@ -1030,6 +1036,21 @@ static inline void ProcessPixel(const Math::Vec2<fixedS28P4>& p, const Math::Vec
 }
 
 /**
+ * Calculate signed area of the triangle spanned by 2 edges.
+ * The sign denotes an orientation.
+ *
+ * @todo define orientation concretely.
+ */
+static fixedS28P4 SignedArea (const Math::Vec2<fixedS28P4>& e1,
+                       const Math::Vec2<fixedS28P4>& e2) {
+    // Essentially the last row of a cross-product
+    return e1.x * e2.y - e1.y * e2.x;
+};
+
+static Common::Profiling::TimingCategory rasterization_category("Rasterization");
+MICROPROFILE_DEFINE(GPU_Rasterization, "GPU", "Rasterization", MP_RGB(50, 50, 240));
+
+/**
  * Helper function for ProcessTriangle with the "reversed" flag to allow for implementing
  * culling via recursion.
  */
@@ -1056,13 +1077,13 @@ static void ProcessTriangleInternal(const Shader::OutputVertex& v0,
                                       ScreenToRasterizerCoordinates(v2.screenpos) };
 
     // Deltas
-    auto d21 = vtxpos[2].xy() - vtxpos[1].xy();
-    auto d02 = vtxpos[0].xy() - vtxpos[2].xy();
-    auto d10 = vtxpos[1].xy() - vtxpos[0].xy();
+    auto d01 = vtxpos[1].xy() - vtxpos[0].xy();
+    auto d12 = vtxpos[2].xy() - vtxpos[1].xy();
+    auto d20 = vtxpos[0].xy() - vtxpos[2].xy();
 
     if (regs.cull_mode == Regs::CullMode::KeepAll) {
         // Make sure we always end up with a triangle wound counter-clockwise
-        if (!reversed && SignedArea(d10, d02) >= 0) {
+        if (!reversed && SignedArea(d01, d20).ToRaw() <= 0) {
             ProcessTriangleInternal(v0, v2, v1, true);
             return;
         }
@@ -1074,7 +1095,7 @@ static void ProcessTriangleInternal(const Shader::OutputVertex& v0,
         }
 
         // Cull away triangles which are wound clockwise.
-        if (SignedArea(d10, d02) >= 0)
+        if (SignedArea(d01, d20).ToRaw() <= 0)
             return;
     }
 
@@ -1126,9 +1147,9 @@ static void ProcessTriangleInternal(const Shader::OutputVertex& v0,
         }
     };
 
-    auto bias0 = IsRightSideOrFlatBottomEdge(d10, d21) ? -1 : 0;
-    auto bias1 = IsRightSideOrFlatBottomEdge(d21, d02) ? -1 : 0;
-    auto bias2 = IsRightSideOrFlatBottomEdge(d02, d10) ? -1 : 0;
+    auto bias0 = IsRightSideOrFlatBottomEdge(d20, d01) ? -1 : 0;
+    auto bias1 = IsRightSideOrFlatBottomEdge(d01, d12) ? -1 : 0;
+    auto bias2 = IsRightSideOrFlatBottomEdge(d12, d20) ? -1 : 0;
 
     // Helpers for our fixed point pixel coordinates
     auto pixel = fixedS28P4::FromFixed(1);
@@ -1140,36 +1161,29 @@ static void ProcessTriangleInternal(const Shader::OutputVertex& v0,
     Math::Vec2<fixedS28P4> p = Math::MakeVec(min_x, min_y);
 
     // Barycentric coordinates at min_x, min_y
-    auto dp0 = p - vtxpos[0].xy();
-    auto dp1 = p - vtxpos[1].xy();
-    auto dp2 = p - vtxpos[2].xy();
-    fixedS28P4 row_w0 = fixedS28P4::FromRaw(SignedArea(d21, dp2) + bias0);
-    fixedS28P4 row_w1 = fixedS28P4::FromRaw(SignedArea(d02, dp0) + bias1);
-    fixedS28P4 row_w2 = fixedS28P4::FromRaw(SignedArea(d10, dp1) + bias2);
+    auto dp0 = vtxpos[0].xy() - p;
+    auto dp1 = vtxpos[1].xy() - p;
+    auto dp2 = vtxpos[2].xy() - p;
+    int row_w0 = SignedArea(d12, dp1).ToRaw() + bias0;
+    int row_w1 = SignedArea(d20, dp2).ToRaw() + bias1;
+    int row_w2 = SignedArea(d01, dp0).ToRaw() + bias2;
 
     // Enter rasterization loop, starting at the center of the topleft bounding box corner.
     // TODO: Not sure if looping through x first might be faster
     for (p.y = min_y; p.y < max_y; p.y += pixel) {
 
-        fixedS28P4 w0 = row_w0;
-        fixedS28P4 w1 = row_w1;
-        fixedS28P4 w2 = row_w2;
+        int w0 = row_w0;
+        int w1 = row_w1;
+        int w2 = row_w2;
 
-        //DAFUQ?! runs this loop from Int() 0 - 399 and only runs the following loop when p.y.Int() = 0
-        //=> y=0
-        //=>    x=0
-        //=>    x=1
-        //=>    ...
-        //=>    x=239
-        //=> y=1
-        //=> y=2
-        //=> y=..
-        //=> y=399
-        //=> y=0
-        //=>    x=0
-        //=>    x=1
-        //=>    ...
+#if 0
 
+printf("--- helpers are: %d %d; %d %d; %d %d\n", d01.x.ToRaw(), d01.y.ToRaw(), d12.x.ToRaw(), d12.y.ToRaw(), d20.x.ToRaw(), d20.y.ToRaw());
+printf("w0: %d expected %d\n", w0, c_w0);
+printf("w1: %d expected %d\n", w1, c_w1);
+printf("w2: %d expected %d\n", w2, c_w2);
+
+#endif
 
         for (p.x = min_x; p.x < max_x; p.x += pixel) {
 
@@ -1178,37 +1192,21 @@ static void ProcessTriangleInternal(const Shader::OutputVertex& v0,
             if (scissor_passed) {
 
                 // If the pixel is inside the current primitive
-                //if ((w0.ToRaw() | w1.ToRaw() | w2.ToRaw()) >= 0) {
-                if(1) {
-
-                    auto baricentric_coordinates = Math::MakeVec(float24::FromFloat32(static_cast<float>(w0.ToRaw())),
-                                                                 float24::FromFloat32(static_cast<float>(w1.ToRaw())),
-                                                                 float24::FromFloat32(static_cast<float>(w2.ToRaw())));
-
-                    //ProcessPixel(p, baricentric_coordinates, v0, v1, v2);
-#if 1
-                    printf("Drawing %d %d (%d %d - %d %d) (%d %d)\n", p.x.Int(), p.y.Int(),
-                           min_x.ToRaw(),  min_y.ToRaw(),
-                           max_x.ToRaw(),  max_y.ToRaw(),
-                           framebuffer.GetWidth(), framebuffer.GetHeight());
-#endif
-//                    DrawPixel(p.x.Int(), p.y.Int(), Math::MakeVec((u8)w0.ToRaw(), (u8)w1.ToRaw(), (u8)w2.ToRaw(), (u8)255));
-                      DrawPixel(p.x.Int(), p.y.Int(), Math::MakeVec((u8)255, (u8)0, (u8)255, (u8)255));
-
-                }
+                if ((w0 | w1 | w2) >= 0)
+                    ProcessPixel(p, w0, w1, w2, v0, v1, v2);
 
             }
 
             // Next pixel in row
-            w0 -= d10.y;
-            w1 -= d21.y;
-            w2 -= d02.y;
+            w0 += d12.y.ToRaw();
+            w1 += d20.y.ToRaw();
+            w2 += d01.y.ToRaw();
         }
 
         // Next row
-        row_w0 += d10.x;
-        row_w1 += d21.x;
-        row_w2 += d02.x;
+        row_w0 -= d12.x.ToRaw();
+        row_w1 -= d20.x.ToRaw();
+        row_w2 -= d01.x.ToRaw();
     }
 }
 
