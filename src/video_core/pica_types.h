@@ -167,7 +167,7 @@ public:
     }
 
     static Fixed<I, F, T> FromFloat32(float val) {
-        return FromRaw((T)roundf(val * (float)(1 << F)));
+        return FromRaw(static_cast<T>(roundf(val * (float)(1 << F))));
     }
 
     static Fixed<I, F, T> Zero() {
@@ -201,7 +201,7 @@ public:
     }
 
     Fixed<I, F, T> operator = (const Fixed<I, F, T>& fxd) const {
-        return FromRaw(fxd.value);
+        return FromRaw(fxd.ToRaw());
     }
 
     Fixed<I, F, T> operator * (const Fixed<I, F, T>& fxd) const {
