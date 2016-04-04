@@ -25,6 +25,8 @@ namespace Pica {
 
 namespace Rasterizer {
 
+RasterizerSetup g_setup;
+
 static void DrawPixel(int x, int y, const Math::Vec4<u8>& color) {
     const auto& framebuffer = g_state.regs.framebuffer;
     const PAddr addr = framebuffer.GetColorBufferPhysicalAddress();
@@ -253,17 +255,19 @@ static u8 PerformStencilAction(Regs::StencilAction action, u8 old_stencil, u8 re
 }
 
 //FIXME: Move to class RasterizerSetup
-static inline void Setup() {
+void RasterizerSetup::Setup() {
 
-}
+    #define C(...) functions.push_back([](RasterizerState& state) { __VA_ARGS__ });
 
-static inline void ProcessPixel(const Math::Vec2<fixedS28P4>& p,
-                                int w0, int w1, int w2,
-                                const Shader::OutputVertex& v0,
-                                const Shader::OutputVertex& v1,
-                                const Shader::OutputVertex& v2) {
+    needs_uv[0] = false;
+    needs_uv[1] = false;
+    needs_uv[2] = false;
+    needs_primary_color = false;
+    functions.clear();
 
     const auto& regs = g_state.regs;
+
+    const auto& output_merger = regs.output_merger;
 
     auto textures = regs.GetTextures();
     auto tev_stages = regs.GetTevStages();
@@ -271,124 +275,80 @@ static inline void ProcessPixel(const Math::Vec2<fixedS28P4>& p,
     bool stencil_action_enable = g_state.regs.output_merger.stencil_test.enable && g_state.regs.framebuffer.depth_format == Regs::DepthFormat::D24S8;
     const auto stencil_test = g_state.regs.output_merger.stencil_test;
 
-    auto w_inverse = Math::MakeVec(v0.pos.w, v1.pos.w, v2.pos.w);
-
-    auto barycentric_coordinates = Math::MakeVec(float24::FromFloat32(static_cast<float>(w0)),
-                                                 float24::FromFloat32(static_cast<float>(w1)),
-                                                 float24::FromFloat32(static_cast<float>(w2)));
-
-    float24 interpolated_w_inverse = float24::FromFloat32(1.0f) / Math::Dot(w_inverse, barycentric_coordinates);
-
-    // Perspective correct attribute interpolation:
-    // Attribute values cannot be calculated by simple linear interpolation since
-    // they are not linear in screen space. For example, when interpolating a
-    // texture coordinate across two vertices, something simple like
-    //     u = (u0*w0 + u1*w1)/(w0+w1)
-    // will not work. However, the attribute value divided by the
-    // clipspace w-coordinate (u/w) and and the inverse w-coordinate (1/w) are linear
-    // in screenspace. Hence, we can linearly interpolate these two independently and
-    // calculate the interpolated attribute by dividing the results.
-    // I.e.
-    //     u_over_w   = ((u0/v0.pos.w)*w0 + (u1/v1.pos.w)*w1)/(w0+w1)
-    //     one_over_w = (( 1/v0.pos.w)*w0 + ( 1/v1.pos.w)*w1)/(w0+w1)
-    //     u = u_over_w / one_over_w
-    //
-    // The generalization to three vertices is straightforward in barycentric coordinates.
-    auto GetInterpolatedAttribute = [&](float24 attr0, float24 attr1, float24 attr2) {
-        auto attr_over_w = Math::MakeVec(attr0, attr1, attr2);
-        float24 interpolated_attr_over_w = Math::Dot(attr_over_w, barycentric_coordinates);
-        return interpolated_attr_over_w * interpolated_w_inverse;
-    };
-
-    Math::Vec4<u8> primary_color{
-        (u8)(GetInterpolatedAttribute(v0.color.r(), v1.color.r(), v2.color.r()).ToFloat32() * 255),
-        (u8)(GetInterpolatedAttribute(v0.color.g(), v1.color.g(), v2.color.g()).ToFloat32() * 255),
-        (u8)(GetInterpolatedAttribute(v0.color.b(), v1.color.b(), v2.color.b()).ToFloat32() * 255),
-        (u8)(GetInterpolatedAttribute(v0.color.a(), v1.color.a(), v2.color.a()).ToFloat32() * 255)
-    };
-
-    Math::Vec2<float24> uv[3];
-    uv[0].u() = GetInterpolatedAttribute(v0.tc0.u(), v1.tc0.u(), v2.tc0.u());
-    uv[0].v() = GetInterpolatedAttribute(v0.tc0.v(), v1.tc0.v(), v2.tc0.v());
-    uv[1].u() = GetInterpolatedAttribute(v0.tc1.u(), v1.tc1.u(), v2.tc1.u());
-    uv[1].v() = GetInterpolatedAttribute(v0.tc1.v(), v1.tc1.v(), v2.tc1.v());
-    uv[2].u() = GetInterpolatedAttribute(v0.tc2.u(), v1.tc2.u(), v2.tc2.u());
-    uv[2].v() = GetInterpolatedAttribute(v0.tc2.v(), v1.tc2.v(), v2.tc2.v());
-
-#if 0
-printf("tc: %d %d. %f %f\n",p.x.Int(), p.y.Int(), uv[0].u().ToFloat32(),uv[0].v().ToFloat32());
-DrawPixel(p.x.Int(),p.y.Int(),Math::MakeVec((u8)(uv[0].u().ToFloat32()*255),
-                                            (u8)(uv[0].v().ToFloat32()*255),
-                                            (u8)0, (u8)255));
-return;
-#endif
-
-    Math::Vec4<u8> texture_color[3]{};
     for (int i = 0; i < 3; ++i) {
         const auto& texture = textures[i];
         if (!texture.enabled)
             continue;
 
-        DEBUG_ASSERT(0 != texture.config.address);
+        needs_uv[i] = true;
+        auto SampleTexture = [texture, i](RasterizerState& state){
 
-        int s = (int)(uv[i].u() * float24::FromFloat32(static_cast<float>(texture.config.width))).ToFloat32();
-        int t = (int)(uv[i].v() * float24::FromFloat32(static_cast<float>(texture.config.height))).ToFloat32();
-        static auto GetWrappedTexCoord = [](Regs::TextureConfig::WrapMode mode, int val, unsigned size) {
-            switch (mode) {
-                case Regs::TextureConfig::ClampToEdge:
-                    val = std::max(val, 0);
-                    val = std::min(val, (int)size - 1);
-                    return val;
+            //FIXME: Split into smaller steps?!
 
-                case Regs::TextureConfig::ClampToBorder:
-                    return val;
+            DEBUG_ASSERT(0 != texture.config.address);
+            int s = (int)(state.uv[i].u() * float24::FromFloat32(static_cast<float>(texture.config.width))).ToFloat32();
+            int t = (int)(state.uv[i].v() * float24::FromFloat32(static_cast<float>(texture.config.height))).ToFloat32();
+            static auto GetWrappedTexCoord = [](Regs::TextureConfig::WrapMode mode, int val, unsigned size) {
+                switch (mode) {
+                    case Regs::TextureConfig::ClampToEdge:
+                        val = std::max(val, 0);
+                        val = std::min(val, (int)size - 1);
+                        return val;
 
-                case Regs::TextureConfig::Repeat:
-                    return (int)((unsigned)val % size);
+                    case Regs::TextureConfig::ClampToBorder:
+                        return val;
 
-                case Regs::TextureConfig::MirroredRepeat:
-                {
-                    unsigned int coord = ((unsigned)val % (2 * size));
-                    if (coord >= size)
-                        coord = 2 * size - 1 - coord;
-                    return (int)coord;
+                    case Regs::TextureConfig::Repeat:
+                        return (int)((unsigned)val % size);
+
+                    case Regs::TextureConfig::MirroredRepeat:
+                    {
+                        unsigned int coord = ((unsigned)val % (2 * size));
+                        if (coord >= size)
+                            coord = 2 * size - 1 - coord;
+                        return (int)coord;
+                    }
+
+                    default:
+                        LOG_ERROR(HW_GPU, "Unknown texture coordinate wrapping mode %x", (int)mode);
+                        UNIMPLEMENTED();
+                        return 0;
                 }
+            };
 
-                default:
-                    LOG_ERROR(HW_GPU, "Unknown texture coordinate wrapping mode %x", (int)mode);
-                    UNIMPLEMENTED();
-                    return 0;
+            if ((texture.config.wrap_s == Regs::TextureConfig::ClampToBorder && (s < 0 || s >= texture.config.width))
+                || (texture.config.wrap_t == Regs::TextureConfig::ClampToBorder && (t < 0 || t >= texture.config.height))) {
+                auto border_color = texture.config.border_color;
+                state.texture_color[i] = { border_color.r, border_color.g, border_color.b, border_color.a };
+            } else {
+                // Textures are laid out from bottom to top, hence we invert the t coordinate.
+                // NOTE: This may not be the right place for the inversion.
+                // TODO: Check if this applies to ETC textures, too.
+                s = GetWrappedTexCoord(texture.config.wrap_s, s, texture.config.width);
+                t = texture.config.height - 1 - GetWrappedTexCoord(texture.config.wrap_t, t, texture.config.height);
+
+                u8* texture_data = Memory::GetPhysicalPointer(texture.config.GetPhysicalAddress());
+                auto info = DebugUtils::TextureInfo::FromPicaRegister(texture.config, texture.format);
+
+                // TODO: Apply the min and mag filters to the texture
+                state.texture_color[i] = DebugUtils::LookupTexture(texture_data, s, t, info);
+#if PICA_DUMP_TEXTURES
+                DebugUtils::DumpTexture(texture.config, texture_data);
+#endif
             }
         };
+        functions.push_back(SampleTexture);
 
-        if ((texture.config.wrap_s == Regs::TextureConfig::ClampToBorder && (s < 0 || s >= texture.config.width))
-            || (texture.config.wrap_t == Regs::TextureConfig::ClampToBorder && (t < 0 || t >= texture.config.height))) {
-            auto border_color = texture.config.border_color;
-            texture_color[i] = { border_color.r, border_color.g, border_color.b, border_color.a };
-        } else {
-            // Textures are laid out from bottom to top, hence we invert the t coordinate.
-            // NOTE: This may not be the right place for the inversion.
-            // TODO: Check if this applies to ETC textures, too.
-            s = GetWrappedTexCoord(texture.config.wrap_s, s, texture.config.width);
-            t = texture.config.height - 1 - GetWrappedTexCoord(texture.config.wrap_t, t, texture.config.height);
-
-            u8* texture_data = Memory::GetPhysicalPointer(texture.config.GetPhysicalAddress());
-            auto info = DebugUtils::TextureInfo::FromPicaRegister(texture.config, texture.format);
-
-            // TODO: Apply the min and mag filters to the texture
-            texture_color[i] = DebugUtils::LookupTexture(texture_data, s, t, info);
-#if PICA_DUMP_TEXTURES
-            DebugUtils::DumpTexture(texture.config, texture_data);
-#endif
-        }
     }
 
-#if 0
-//FIXME: This is a hack to test drawing speed
-DrawPixel(p.x.Int(), p.y.Int(), texture_color[0]);
-return;
+
+//FIXME: Dirty hack to show texture0
+#if 1
+    C( state.combiner_output = state.texture_color[0];
+       state.result = state.texture_color[0]; );
 #endif
 
+#if 0
     // Texture environment - consists of 6 stages of color and alpha combining.
     //
     // Color combiners take three input color values from some source (e.g. interpolated
@@ -396,7 +356,6 @@ return;
     // operations on each of them (e.g. inversion) and then calculate the output color
     // with some basic arithmetic. Alpha combiners can be configured separately but work
     // analogously.
-    Math::Vec4<u8> combiner_output;
     Math::Vec4<u8> combiner_buffer = {0, 0, 0, 0};
     Math::Vec4<u8> next_combiner_buffer = {
         regs.tev_combiner_buffer_color.r, regs.tev_combiner_buffer_color.g,
@@ -660,48 +619,56 @@ return;
         }
     }
 
-    const auto& output_merger = regs.output_merger;
+#endif
+
+
+// Implemented but not working yet?!
+#if 1
+
     // TODO: Does alpha testing happen before or after stencil?
     if (output_merger.alpha_test.enable) {
-        bool pass = false;
 
         switch (output_merger.alpha_test.func) {
         case Regs::CompareFunc::Never:
-            pass = false;
+            C( state.alpha_pass = false; );
             break;
 
         case Regs::CompareFunc::Always:
-            pass = true;
+            C( state.alpha_pass = true; );
             break;
 
         case Regs::CompareFunc::Equal:
-            pass = combiner_output.a() == output_merger.alpha_test.ref;
+            C( state.alpha_pass = state.combiner_output.a() == output_merger.alpha_test.ref; );
             break;
 
         case Regs::CompareFunc::NotEqual:
-            pass = combiner_output.a() != output_merger.alpha_test.ref;
+            C( state.alpha_pass = state.combiner_output.a() != output_merger.alpha_test.ref; );
             break;
 
         case Regs::CompareFunc::LessThan:
-            pass = combiner_output.a() < output_merger.alpha_test.ref;
+            C( state.alpha_pass = state.combiner_output.a() < output_merger.alpha_test.ref; );
             break;
 
         case Regs::CompareFunc::LessThanOrEqual:
-            pass = combiner_output.a() <= output_merger.alpha_test.ref;
+            C( state.alpha_pass = state.combiner_output.a() <= output_merger.alpha_test.ref; );
             break;
 
         case Regs::CompareFunc::GreaterThan:
-            pass = combiner_output.a() > output_merger.alpha_test.ref;
+            C( state.alpha_pass = state.combiner_output.a() > output_merger.alpha_test.ref; );
             break;
 
         case Regs::CompareFunc::GreaterThanOrEqual:
-            pass = combiner_output.a() >= output_merger.alpha_test.ref;
+            C( state.alpha_pass = state.combiner_output.a() >= output_merger.alpha_test.ref; );
             break;
         }
 
-        if (!pass)
-            return;
+        //FIXME: Merge this test with the cases above, except ::Never, precalc the result for ::Always
+        C( if (!state.alpha_pass)
+               state.discard = true; );
     }
+#endif
+
+#if 0
 
     u8 old_stencil = 0;
 
@@ -756,66 +723,76 @@ return;
         }
     }
 
-    unsigned num_bits = Regs::DepthBitsPerPixel(regs.framebuffer.depth_format);
-    int wsum = w0 + w1 + w2;
-    u32 z = (u32)((v0.screenpos[2].ToFloat32() * w0 +
-                   v1.screenpos[2].ToFloat32() * w1 +
-                   v2.screenpos[2].ToFloat32() * w2) * ((1 << num_bits) - 1) / wsum);
+#endif
 
+#if 1
     if (output_merger.depth_test_enable) {
-        u32 ref_z = GetDepth(p.x.Int(), p.y.Int());
 
-        bool pass = false;
+        //FIXME: What else to do? I did this so it can be done for each case
+        #define REF_Z GetDepth(state.p.x.Int(), state.p.y.Int())
+
+        //FIXME: pass renamed to state.z_pass!
 
         switch (output_merger.depth_test_func) {
+
+        //FIXME: Avoid the function call and create a flag in the settings instead?!
         case Regs::CompareFunc::Never:
-            pass = false;
+            C( state.z_pass = false; );
             break;
 
         case Regs::CompareFunc::Always:
-            pass = true;
+            C( state.z_pass = true; );
             break;
 
         case Regs::CompareFunc::Equal:
-            pass = z == ref_z;
+            C( state.z_pass = state.z == REF_Z; );
             break;
 
         case Regs::CompareFunc::NotEqual:
-            pass = z != ref_z;
+            C( state.z_pass = state.z != REF_Z; );
             break;
 
         case Regs::CompareFunc::LessThan:
-            pass = z < ref_z;
+            C( state.z_pass = state.z < REF_Z; );
             break;
 
         case Regs::CompareFunc::LessThanOrEqual:
-            pass = z <= ref_z;
+            C( state.z_pass = state.z <= REF_Z; );
             break;
 
         case Regs::CompareFunc::GreaterThan:
-            pass = z > ref_z;
+            C( state.z_pass = state.z > REF_Z; );
             break;
 
         case Regs::CompareFunc::GreaterThanOrEqual:
-            pass = z >= ref_z;
+            C( state.z_pass = state.z >= REF_Z; );
             break;
         }
 
-        if (!pass) {
-            if (stencil_action_enable)
-                UpdateStencil(stencil_test.action_depth_fail);
-            return;
-        }
+        //FIXME: same as alpha test, precalc result for always and never and merge with each case
+        C(
+            if (!state.z_pass) {
+//FIXME:!!!!
+#if 0
+                if (stencil_action_enable)
+                    UpdateStencil(stencil_test.action_depth_fail);
+#endif
+                state.discard = true;
+            }
+        );
     }
 
-    if (output_merger.depth_write_enable)
-        SetDepth(p.x.Int(), p.y.Int(), z);
+    if (output_merger.depth_write_enable) {
+        C( SetDepth(state.p.x.Int(), state.p.y.Int(), state.z); );
+    }
+#endif
+
+#if 0
 
     // The stencil depth_pass action is executed even if depth testing is disabled
     if (stencil_action_enable)
         UpdateStencil(stencil_test.action_depth_pass);
 
-    auto dest = GetPixel(p.x.Int(), p.y.Int());
     Math::Vec4<u8> blend_output = combiner_output;
 
     if (output_merger.alphablend_enable) {
@@ -1025,14 +1002,116 @@ return;
             LogicOp(combiner_output.a(), dest.a(), output_merger.logic_op));
     }
 
-    const Math::Vec4<u8> result = {
-        output_merger.red_enable   ? blend_output.r() : dest.r(),
-        output_merger.green_enable ? blend_output.g() : dest.g(),
-        output_merger.blue_enable  ? blend_output.b() : dest.b(),
-        output_merger.alpha_enable ? blend_output.a() : dest.a()
+    state.result = blend_output;
+
+    // Handle color masks
+    //FIXME: Only push if any of them is false
+    //FIXME: Should be merged with logicop / blend
+    functions.push_back([](RasterizerState& state) {
+        state.result = {
+            output_merger.red_enable   ? state.result.r() : state.dest.r(),
+            output_merger.green_enable ? state.result.g() : state.dest.g(),
+            output_merger.blue_enable  ? state.result.b() : state.dest.b(),
+            output_merger.alpha_enable ? state.result.a() : state.dest.a()
+        };
+    });
+
+#endif
+
+    // Writeback
+    C( DrawPixel(state.p.x.Int(), state.p.y.Int(), state.result); );
+}
+
+
+inline void RasterizerSetup::ProcessPixel(const Math::Vec2<fixedS28P4>& p,
+                                          int w0, int w1, int w2,
+                                          const Shader::OutputVertex& v0,
+                                          const Shader::OutputVertex& v1,
+                                          const Shader::OutputVertex& v2) {
+
+    RasterizerState state;
+
+    const auto& regs = g_state.regs;
+
+    auto textures = regs.GetTextures();
+    auto tev_stages = regs.GetTevStages();
+
+    bool stencil_action_enable = g_state.regs.output_merger.stencil_test.enable && g_state.regs.framebuffer.depth_format == Regs::DepthFormat::D24S8;
+    const auto stencil_test = g_state.regs.output_merger.stencil_test;
+
+    auto w_inverse = Math::MakeVec(v0.pos.w, v1.pos.w, v2.pos.w);
+
+    auto barycentric_coordinates = Math::MakeVec(float24::FromFloat32(static_cast<float>(w0)),
+                                                 float24::FromFloat32(static_cast<float>(w1)),
+                                                 float24::FromFloat32(static_cast<float>(w2)));
+
+    float24 interpolated_w_inverse = float24::FromFloat32(1.0f) / Math::Dot(w_inverse, barycentric_coordinates);
+
+    // Perspective correct attribute interpolation:
+    // Attribute values cannot be calculated by simple linear interpolation since
+    // they are not linear in screen space. For example, when interpolating a
+    // texture coordinate across two vertices, something simple like
+    //     u = (u0*w0 + u1*w1)/(w0+w1)
+    // will not work. However, the attribute value divided by the
+    // clipspace w-coordinate (u/w) and and the inverse w-coordinate (1/w) are linear
+    // in screenspace. Hence, we can linearly interpolate these two independently and
+    // calculate the interpolated attribute by dividing the results.
+    // I.e.
+    //     u_over_w   = ((u0/v0.pos.w)*w0 + (u1/v1.pos.w)*w1)/(w0+w1)
+    //     one_over_w = (( 1/v0.pos.w)*w0 + ( 1/v1.pos.w)*w1)/(w0+w1)
+    //     u = u_over_w / one_over_w
+    //
+    // The generalization to three vertices is straightforward in barycentric coordinates.
+    auto GetInterpolatedAttribute = [&](float24 attr0, float24 attr1, float24 attr2) {
+        auto attr_over_w = Math::MakeVec(attr0, attr1, attr2);
+        float24 interpolated_attr_over_w = Math::Dot(attr_over_w, barycentric_coordinates);
+        return interpolated_attr_over_w * interpolated_w_inverse;
     };
 
-    DrawPixel(p.x.Int(), p.y.Int(), result);
+    if (needs_primary_color) {
+        state.primary_color = {
+            (u8)(GetInterpolatedAttribute(v0.color.r(), v1.color.r(), v2.color.r()).ToFloat32() * 255),
+            (u8)(GetInterpolatedAttribute(v0.color.g(), v1.color.g(), v2.color.g()).ToFloat32() * 255),
+            (u8)(GetInterpolatedAttribute(v0.color.b(), v1.color.b(), v2.color.b()).ToFloat32() * 255),
+            (u8)(GetInterpolatedAttribute(v0.color.a(), v1.color.a(), v2.color.a()).ToFloat32() * 255)
+        };
+    }
+
+    //FIXME: Replace with a loop
+    if (needs_uv[0]) {
+        state.uv[0].u() = GetInterpolatedAttribute(v0.tc0.u(), v1.tc0.u(), v2.tc0.u());
+        state.uv[0].v() = GetInterpolatedAttribute(v0.tc0.v(), v1.tc0.v(), v2.tc0.v());
+    }
+    if (needs_uv[1]) {
+        state.uv[1].u() = GetInterpolatedAttribute(v0.tc1.u(), v1.tc1.u(), v2.tc1.u());
+        state.uv[1].v() = GetInterpolatedAttribute(v0.tc1.v(), v1.tc1.v(), v2.tc1.v());
+    }
+    if (needs_uv[2]) {
+        state.uv[2].u() = GetInterpolatedAttribute(v0.tc2.u(), v1.tc2.u(), v2.tc2.u());
+        state.uv[2].v() = GetInterpolatedAttribute(v0.tc2.v(), v1.tc2.v(), v2.tc2.v());
+    }
+
+    state.p = p;
+    state.discard = false;
+
+    unsigned num_bits = Regs::DepthBitsPerPixel(regs.framebuffer.depth_format);
+    int wsum = w0 + w1 + w2;
+    state.z = (u32)((v0.screenpos[2].ToFloat32() * w0 +
+                     v1.screenpos[2].ToFloat32() * w1 +
+                     v2.screenpos[2].ToFloat32() * w2) * ((1 << num_bits) - 1) / wsum);
+
+    state.dest = GetPixel(state.p.x.Int(), state.p.y.Int());
+
+    //FIXME: Instead cause functions to tail return to the next handler.
+    //       Ideally we'd also stuck some of this into a template and generate a table
+    //       of commonly used modes so we can speed them up by letting the compiler optimize those paths
+    for(unsigned i = 0; i < functions.size(); i++) {
+        if (state.discard)
+            break;
+        functions[i](state);
+    }
+
+    return;
 }
 
 /**
@@ -1193,7 +1272,7 @@ printf("w2: %d expected %d\n", w2, c_w2);
 
                 // If the pixel is inside the current primitive
                 if ((w0 | w1 | w2) >= 0)
-                    ProcessPixel(p, w0, w1, w2, v0, v1, v2);
+                    g_setup.ProcessPixel(p, w0, w1, w2, v0, v1, v2);
 
             }
 
