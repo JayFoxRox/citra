@@ -127,6 +127,14 @@ struct State {
 
     // This is constructed with a dummy triangle topology
     PrimitiveAssembler<Shader::OutputVertex> primitive_assembler;
+
+    /// Current geometry shader state
+    struct GeometryShaderState {
+        // Buffer used for geometry shader inputs
+        Shader::AttributeBuffer buffer;
+        // The current index into the buffer
+        unsigned int index;
+    } gs_input_buffer;
 };
 
 extern State g_state; ///< Current Pica state

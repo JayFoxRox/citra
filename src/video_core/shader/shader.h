@@ -15,6 +15,7 @@
 #include "video_core/pica_types.h"
 #include "video_core/regs_rasterizer.h"
 #include "video_core/regs_shader.h"
+#include "video_core/primitive_assembly.h"
 
 using nihstro::RegisterType;
 using nihstro::SourceRegister;
@@ -76,6 +77,18 @@ struct UnitState {
     } registers;
     static_assert(std::is_pod<Registers>::value, "Structure is not POD");
 
+    AttributeBuffer emit_buffers[3]; // TODO: 3dbrew suggests this only stores the
+                                     // first 7 output registers
+
+    union EmitParameters {
+        u32 raw;
+        BitField<22, 1, u32> winding;
+        BitField<23, 1, u32> primitive_emit;
+        BitField<24, 2, u32> vertex_id;
+    } emit_params;
+
+    PrimitiveAssembler<OutputVertex>::TriangleHandler emit_triangle_callback;
+
     bool conditional_code[2];
 
     // Two Address registers and one loop counter
@@ -112,6 +125,10 @@ struct UnitState {
             UNREACHABLE();
             return 0;
         }
+    }
+
+    static size_t EmitParamsOffset() {
+        return offsetof(UnitState, emit_params.raw);
     }
 
     /**
@@ -180,6 +197,10 @@ public:
 // TODO(yuriks): Remove and make it non-global state somewhere
 ShaderEngine* GetEngine();
 void Shutdown();
+
+bool SharedGS();
+
+void HandleEMIT(UnitState& state);
 
 } // namespace Shader
 

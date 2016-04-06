@@ -109,6 +109,33 @@ void Shutdown() {
 #endif // ARCHITECTURE_x86_64
 }
 
+bool SharedGS() {
+    return g_state.regs.pipeline.vs_com_mode == Pica::PipelineRegs::VSComMode::Shared;
+}
+
+void HandleEMIT(UnitState& state) {
+    auto& config = g_state.regs.gs;
+    auto& emit_params = state.emit_params;
+    auto& emit_buffers = state.emit_buffers;
+
+    ASSERT(emit_params.vertex_id < 3);
+
+    std::copy(std::begin(state.registers.output), std::end(state.registers.output),
+              std::begin(emit_buffers[emit_params.vertex_id].attr));
+
+    if (emit_params.primitive_emit) {
+        ASSERT_MSG(state.emit_triangle_callback, "EMIT invoked but no handler set!");
+        OutputVertex v0 = OutputVertex::FromAttributeBuffer(g_state.regs.rasterizer, emit_buffers[0]);
+        OutputVertex v1 = OutputVertex::FromAttributeBuffer(g_state.regs.rasterizer, emit_buffers[1]);
+        OutputVertex v2 = OutputVertex::FromAttributeBuffer(g_state.regs.rasterizer, emit_buffers[2]);
+        if (emit_params.winding) {
+            state.emit_triangle_callback(v2, v1, v0);
+        } else {
+            state.emit_triangle_callback(v0, v1, v2);
+        }
+    }
+}
+
 } // namespace Shader
 
 } // namespace Pica
