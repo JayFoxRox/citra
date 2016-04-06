@@ -62,6 +62,8 @@ public:
     void Compile_CALLU(Instruction instr);
     void Compile_IF(Instruction instr);
     void Compile_LOOP(Instruction instr);
+    void Compile_EMIT(Instruction instr);
+    void Compile_SETEMIT(Instruction instr);
     void Compile_JMP(Instruction instr);
     void Compile_CMP(Instruction instr);
     void Compile_MAD(Instruction instr);

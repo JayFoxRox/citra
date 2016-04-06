@@ -27,70 +27,70 @@ using namespace Gen;
 typedef void (JitShader::*JitFunction)(Instruction instr);
 
 const JitFunction instr_table[64] = {
-    &JitShader::Compile_ADD,   // add
-    &JitShader::Compile_DP3,   // dp3
-    &JitShader::Compile_DP4,   // dp4
-    &JitShader::Compile_DPH,   // dph
-    nullptr,                   // unknown
-    &JitShader::Compile_EX2,   // ex2
-    &JitShader::Compile_LG2,   // lg2
-    nullptr,                   // unknown
-    &JitShader::Compile_MUL,   // mul
-    &JitShader::Compile_SGE,   // sge
-    &JitShader::Compile_SLT,   // slt
-    &JitShader::Compile_FLR,   // flr
-    &JitShader::Compile_MAX,   // max
-    &JitShader::Compile_MIN,   // min
-    &JitShader::Compile_RCP,   // rcp
-    &JitShader::Compile_RSQ,   // rsq
-    nullptr,                   // unknown
-    nullptr,                   // unknown
-    &JitShader::Compile_MOVA,  // mova
-    &JitShader::Compile_MOV,   // mov
-    nullptr,                   // unknown
-    nullptr,                   // unknown
-    nullptr,                   // unknown
-    nullptr,                   // unknown
-    &JitShader::Compile_DPH,   // dphi
-    nullptr,                   // unknown
-    &JitShader::Compile_SGE,   // sgei
-    &JitShader::Compile_SLT,   // slti
-    nullptr,                   // unknown
-    nullptr,                   // unknown
-    nullptr,                   // unknown
-    nullptr,                   // unknown
-    nullptr,                   // unknown
-    &JitShader::Compile_NOP,   // nop
-    &JitShader::Compile_END,   // end
-    nullptr,                   // break
-    &JitShader::Compile_CALL,  // call
-    &JitShader::Compile_CALLC, // callc
-    &JitShader::Compile_CALLU, // callu
-    &JitShader::Compile_IF,    // ifu
-    &JitShader::Compile_IF,    // ifc
-    &JitShader::Compile_LOOP,  // loop
-    nullptr,                   // emit
-    nullptr,                   // sete
-    &JitShader::Compile_JMP,   // jmpc
-    &JitShader::Compile_JMP,   // jmpu
-    &JitShader::Compile_CMP,   // cmp
-    &JitShader::Compile_CMP,   // cmp
-    &JitShader::Compile_MAD,   // madi
-    &JitShader::Compile_MAD,   // madi
-    &JitShader::Compile_MAD,   // madi
-    &JitShader::Compile_MAD,   // madi
-    &JitShader::Compile_MAD,   // madi
-    &JitShader::Compile_MAD,   // madi
-    &JitShader::Compile_MAD,   // madi
-    &JitShader::Compile_MAD,   // madi
-    &JitShader::Compile_MAD,   // mad
-    &JitShader::Compile_MAD,   // mad
-    &JitShader::Compile_MAD,   // mad
-    &JitShader::Compile_MAD,   // mad
-    &JitShader::Compile_MAD,   // mad
-    &JitShader::Compile_MAD,   // mad
-    &JitShader::Compile_MAD,   // mad
-    &JitShader::Compile_MAD,   // mad
+    &JitShader::Compile_ADD,     // add
+    &JitShader::Compile_DP3,     // dp3
+    &JitShader::Compile_DP4,     // dp4
+    &JitShader::Compile_DPH,     // dph
+    nullptr,                     // unknown
+    &JitShader::Compile_EX2,     // ex2
+    &JitShader::Compile_LG2,     // lg2
+    nullptr,                     // unknown
+    &JitShader::Compile_MUL,     // mul
+    &JitShader::Compile_SGE,     // sge
+    &JitShader::Compile_SLT,     // slt
+    &JitShader::Compile_FLR,     // flr
+    &JitShader::Compile_MAX,     // max
+    &JitShader::Compile_MIN,     // min
+    &JitShader::Compile_RCP,     // rcp
+    &JitShader::Compile_RSQ,     // rsq
+    nullptr,                     // unknown
+    nullptr,                     // unknown
+    &JitShader::Compile_MOVA,    // mova
+    &JitShader::Compile_MOV,     // mov
+    nullptr,                     // unknown
+    nullptr,                     // unknown
+    nullptr,                     // unknown
+    nullptr,                     // unknown
+    &JitShader::Compile_DPH,     // dphi
+    nullptr,                     // unknown
+    &JitShader::Compile_SGE,     // sgei
+    &JitShader::Compile_SLT,     // slti
+    nullptr,                     // unknown
+    nullptr,                     // unknown
+    nullptr,                     // unknown
+    nullptr,                     // unknown
+    nullptr,                     // unknown
+    &JitShader::Compile_NOP,     // nop
+    &JitShader::Compile_END,     // end
+    nullptr,                     // break
+    &JitShader::Compile_CALL,    // call
+    &JitShader::Compile_CALLC,   // callc
+    &JitShader::Compile_CALLU,   // callu
+    &JitShader::Compile_IF,      // ifu
+    &JitShader::Compile_IF,      // ifc
+    &JitShader::Compile_LOOP,    // loop
+    &JitShader::Compile_EMIT,    // emit
+    &JitShader::Compile_SETEMIT, // setemit
+    &JitShader::Compile_JMP,     // jmpc
+    &JitShader::Compile_JMP,     // jmpu
+    &JitShader::Compile_CMP,     // cmp
+    &JitShader::Compile_CMP,     // cmp
+    &JitShader::Compile_MAD,     // madi
+    &JitShader::Compile_MAD,     // madi
+    &JitShader::Compile_MAD,     // madi
+    &JitShader::Compile_MAD,     // madi
+    &JitShader::Compile_MAD,     // madi
+    &JitShader::Compile_MAD,     // madi
+    &JitShader::Compile_MAD,     // madi
+    &JitShader::Compile_MAD,     // madi
+    &JitShader::Compile_MAD,     // mad
+    &JitShader::Compile_MAD,     // mad
+    &JitShader::Compile_MAD,     // mad
+    &JitShader::Compile_MAD,     // mad
+    &JitShader::Compile_MAD,     // mad
+    &JitShader::Compile_MAD,     // mad
+    &JitShader::Compile_MAD,     // mad
+    &JitShader::Compile_MAD,     // mad
 };
 
 // The following is used to alias some commonly used registers. Generally, RAX-RDX and XMM0-XMM3 can
@@ -730,6 +730,22 @@ void JitShader::Compile_LOOP(Instruction instr) {
     J_CC(CC_NZ, loop_start);               // Loop if not equal
 
     looping = false;
+}
+
+static void Handle_EMIT(void* param1) {
+    UnitState<false>& state = *static_cast<UnitState<false>*>(param1);
+    Shader::HandleEMIT(state);
+};
+
+void JitShader::Compile_EMIT(Instruction instr) {
+    ABI_PushRegistersAndAdjustStack(PersistentCallerSavedRegs(), 0);
+    MOV(PTRBITS, R(ABI_PARAM1), R(STATE));
+    ABI_CallFunctionR(reinterpret_cast<const void*>(Handle_EMIT), ABI_PARAM1);
+    ABI_PopRegistersAndAdjustStack(PersistentCallerSavedRegs(), 0);
+}
+
+void JitShader::Compile_SETEMIT(Instruction instr) {
+    MOV(32, MDisp(STATE, UnitState<false>::EmitParamsOffset()), Imm32(*(u32*)&instr.setemit));
 }
 
 void JitShader::Compile_JMP(Instruction instr) {

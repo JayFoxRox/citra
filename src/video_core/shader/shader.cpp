@@ -314,6 +314,33 @@ void WriteSwizzlePatterns(bool gs, u32 value) {
     }
 }
 
+template <bool Debug>
+void HandleEMIT(UnitState<Debug>& state) {
+    auto& config = g_state.regs.gs;
+    auto& emit_params = state.emit_params;
+    auto& emit_buffers = state.emit_buffers;
+
+    ASSERT(emit_params.vertex_id < 3);
+
+    emit_buffers[emit_params.vertex_id] = state.output_registers;
+
+    if (emit_params.primitive_emit) {
+        ASSERT_MSG(state.emit_triangle_callback, "EMIT invoked but no handler set!");
+        OutputVertex v0 = emit_buffers[0].ToVertex(config);
+        OutputVertex v1 = emit_buffers[1].ToVertex(config);
+        OutputVertex v2 = emit_buffers[2].ToVertex(config);
+        if (emit_params.winding) {
+            state.emit_triangle_callback(v2, v1, v0);
+        } else {
+            state.emit_triangle_callback(v0, v1, v2);
+        }
+    }
+}
+
+// Explicit instantiation
+template void HandleEMIT(UnitState<false>& state);
+template void HandleEMIT(UnitState<true>& state);
+
 } // namespace Shader
 
 } // namespace Pica
