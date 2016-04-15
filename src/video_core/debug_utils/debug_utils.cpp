@@ -708,12 +708,16 @@ void DumpTevStageConfig(const std::array<Pica::Regs::TevStageConfig,6>& stages)
         const auto& tev_stage = stages[index];
 
         static const std::map<Source, std::string> source_map = {
-            { Source::PrimaryColor, "PrimaryColor" },
-            { Source::Texture0, "Texture0" },
-            { Source::Texture1, "Texture1" },
-            { Source::Texture2, "Texture2" },
-            { Source::Constant, "Constant" },
-            { Source::Previous, "Previous" },
+            { Source::PrimaryColor,           "PrimaryColor" },
+            { Source::PrimaryFragmentColor,   "PrimaryFragmentColor" },
+            { Source::SecondaryFragmentColor, "SecondaryFragmentColor" },
+            { Source::Texture0,               "Texture0" },
+            { Source::Texture1,               "Texture1" },
+            { Source::Texture2,               "Texture2" },
+            { Source::Texture3,               "Texture3" },
+            { Source::PreviousBuffer,         "PreviousBuffer" },
+            { Source::Constant,               "Constant" },
+            { Source::Previous,               "Previous" },
         };
 
         static const std::map<ColorModifier, std::string> color_modifier_map = {
@@ -722,14 +726,19 @@ void DumpTevStageConfig(const std::array<Pica::Regs::TevStageConfig,6>& stages)
         };
         static const std::map<AlphaModifier, std::string> alpha_modifier_map = {
             { AlphaModifier::SourceAlpha, "%source.a" },
-            { AlphaModifier::OneMinusSourceAlpha, "(255 - %source.a)" },
+            { AlphaModifier::OneMinusSourceAlpha, "(1.0 - %source.a)" },
         };
 
         static const std::map<Operation, std::string> combiner_map = {
             { Operation::Replace, "%source1" },
-            { Operation::Modulate, "(%source1 * %source2) / 255" },
+            { Operation::Modulate, "(%source1 * %source2)" },
             { Operation::Add, "(%source1 + %source2)" },
+            { Operation::AddSigned, "(%source1 + %source2) - 0.5" },
             { Operation::Lerp, "lerp(%source1, %source2, %source3)" },
+            { Operation::Subtract, "(%source1 - %source2)" },
+            { Operation::Dot3_RGB, "dot(%source1, %source2)" },
+            { Operation::MultiplyThenAdd, "((%source1 * %source2) + %source3)" },
+            { Operation::AddThenMultiply, "((%source1 + %source2) * %source3)" },
         };
 
         static auto ReplacePattern =
