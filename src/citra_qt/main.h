@@ -18,6 +18,7 @@ class GImageInfo;
 class GPUCommandStreamWidget;
 class GPUCommandListWidget;
 class GraphicsBreakPointsWidget;
+class GraphicsCombinerWidget;
 class GraphicsTracingWidget;
 class GraphicsVertexShaderWidget;
 class GRenderWindow;
@@ -150,6 +151,7 @@ private:
     GPUCommandStreamWidget* graphicsWidget;
     GPUCommandListWidget* graphicsCommandsWidget;
     GraphicsBreakPointsWidget* graphicsBreakpointsWidget;
+    GraphicsCombinerWidget* graphicsCombinerWidget;
     GraphicsVertexShaderWidget* graphicsVertexShaderWidget;
     GraphicsTracingWidget* graphicsTracingWidget;
     WaitTreeWidget* waitTreeWidget;
