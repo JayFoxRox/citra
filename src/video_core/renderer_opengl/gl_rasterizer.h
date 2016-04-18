@@ -38,6 +38,8 @@ struct PicaShaderConfig {
         res.alpha_test_func = regs.output_merger.alpha_test.enable ?
             regs.output_merger.alpha_test.func.Value() : Pica::Regs::CompareFunc::Always;
 
+        res.texture0_type = regs.texture0.type;
+
         // Copy relevant TevStageConfig fields only. We're doing this manually (instead of calling
         // the GetTevStages() function) because BitField explicitly disables copies.
 
@@ -142,6 +144,7 @@ struct PicaShaderConfig {
     };
 
     Pica::Regs::CompareFunc alpha_test_func = Pica::Regs::CompareFunc::Never;
+    Pica::Regs::TextureConfig::TextureType texture0_type = Pica::Regs::TextureConfig::Texture2D;
     std::array<Pica::Regs::TevStageConfig, 6> tev_stages = {};
     u8 combiner_buffer_input = 0;
 
@@ -265,6 +268,7 @@ private:
             tex_coord1[1] = v.tc1.y.ToFloat32();
             tex_coord2[0] = v.tc2.x.ToFloat32();
             tex_coord2[1] = v.tc2.y.ToFloat32();
+            tex_coord0_w = v.tc0_w.ToFloat32();
             normquat[0] = v.quat.x.ToFloat32();
             normquat[1] = v.quat.y.ToFloat32();
             normquat[2] = v.quat.z.ToFloat32();
@@ -285,6 +289,7 @@ private:
         GLfloat tex_coord0[2];
         GLfloat tex_coord1[2];
         GLfloat tex_coord2[2];
+        GLfloat tex_coord0_w;
         GLfloat normquat[4];
         GLfloat view[3];
     };

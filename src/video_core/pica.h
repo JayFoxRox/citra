@@ -124,6 +124,15 @@ struct Regs {
     INSERT_PADDING_WORDS(0x17);
 
     struct TextureConfig {
+        enum TextureType : u32 {
+            Texture2D    = 0,
+            TextureCube  = 1,
+            Shadow2D     = 2,
+            Projection2D = 3,
+            ShadowCube   = 4,
+            Disabled     = 5,
+        };
+
         enum WrapMode : u32 {
             ClampToEdge    = 0,
             ClampToBorder  = 1,
@@ -154,6 +163,7 @@ struct Regs {
             BitField< 2, 1, TextureFilter> min_filter;
             BitField< 8, 2, WrapMode> wrap_t;
             BitField<12, 2, WrapMode> wrap_s;
+            BitField<28, 2, TextureType> type; ///< @note Only valid for texture 0 according to 3DBrew.
         };
 
         INSERT_PADDING_WORDS(0x1);
