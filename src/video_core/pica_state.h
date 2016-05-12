@@ -25,6 +25,8 @@ struct State {
     Shader::ShaderSetup vs;
     Shader::ShaderSetup gs;
 
+    Math::Vec4<float24> vs_default_attributes[16];
+
     struct {
         union LutEntry {
             // Used for raw access
