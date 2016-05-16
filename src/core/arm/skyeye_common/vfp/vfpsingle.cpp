@@ -334,8 +334,9 @@ static u32 vfp_single_fsqrt(ARMul_State* state, int sd, int unused, s32 m, u32 f
 {
     struct vfp_single vsm, vsd, *vsp;
     int ret, tm;
+    u32 exceptions = 0;
 
-    vfp_single_unpack(&vsm, m, &fpscr);
+    exceptions |= vfp_single_unpack(&vsm, m, fpscr);
     tm = vfp_single_type(&vsm);
     if (tm & (VFP_NAN|VFP_INFINITY)) {
         vsp = &vsd;
@@ -408,7 +409,9 @@ sqrt_invalid:
     }
     vsd.significand = vfp_shiftright32jamming(vsd.significand, 1);
 
-    return vfp_single_normaliseround(state, sd, &vsd, fpscr, 0, "fsqrt");
+    exceptions |= vfp_single_normaliseround(state, sd, &vsd, fpscr, 0, "fsqrt");
+
+    return exceptions;
 }
 
 /*
@@ -503,7 +506,7 @@ static u32 vfp_single_fcvtd(ARMul_State* state, int dd, int unused, s32 m, u32 f
     int tm;
     u32 exceptions = 0;
 
-    vfp_single_unpack(&vsm, m, &fpscr);
+    exceptions |= vfp_single_unpack(&vsm, m, fpscr);
 
     tm = vfp_single_type(&vsm);
 
@@ -511,7 +514,7 @@ static u32 vfp_single_fcvtd(ARMul_State* state, int dd, int unused, s32 m, u32 f
      * If we have a signalling NaN, signal invalid operation.
      */
     if (tm == VFP_SNAN)
-        exceptions = FPSCR_IOC;
+        exceptions |= FPSCR_IOC;
 
     if (tm & VFP_DENORMAL)
         vfp_single_normalise_denormal(&vsm);
@@ -568,7 +571,7 @@ static u32 vfp_single_ftoui(ARMul_State* state, int sd, int unused, s32 m, u32 f
     int rmode = fpscr & FPSCR_RMODE_MASK;
     int tm;
 
-    vfp_single_unpack(&vsm, m, &fpscr);
+    exceptions |= vfp_single_unpack(&vsm, m, fpscr);
     vfp_single_dump("VSM", &vsm);
 
     /*
@@ -583,7 +586,7 @@ static u32 vfp_single_ftoui(ARMul_State* state, int sd, int unused, s32 m, u32 f
 
     if (vsm.exponent >= 127 + 32) {
         d = vsm.sign ? 0 : 0xffffffff;
-        exceptions = FPSCR_IOC;
+        exceptions |= FPSCR_IOC;
     } else if (vsm.exponent >= 127) {
         int shift = 127 + 31 - vsm.exponent;
         u32 rem, incr = 0;
@@ -592,7 +595,11 @@ static u32 vfp_single_ftoui(ARMul_State* state, int sd, int unused, s32 m, u32 f
          * 2^0 <= m < 2^32-2^8
          */
         d = (vsm.significand << 1) >> shift;
-        rem = vsm.significand << (33 - shift);
+        if (shift > 0) {
+            rem = (vsm.significand << 1) << (32 - shift);
+        } else {
+            rem = 0;
+        }
 
         if (rmode == FPSCR_ROUND_NEAREST) {
             incr = 0x80000000;
@@ -619,12 +626,20 @@ static u32 vfp_single_ftoui(ARMul_State* state, int sd, int unused, s32 m, u32 f
     } else {
         d = 0;
         if (vsm.exponent | vsm.significand) {
-            exceptions |= FPSCR_IXC;
-            if (rmode == FPSCR_ROUND_PLUSINF && vsm.sign == 0)
+            if (rmode == FPSCR_ROUND_NEAREST) {
+                if (vsm.exponent >= 126) {
+                    d = vsm.sign ? 0 : 1;
+                    exceptions |= vsm.sign ? FPSCR_IOC : FPSCR_IXC;
+                } else {
+                    exceptions |= FPSCR_IXC;
+                }
+            } else if (rmode == FPSCR_ROUND_PLUSINF && vsm.sign == 0) {
                 d = 1;
-            else if (rmode == FPSCR_ROUND_MINUSINF && vsm.sign) {
-                d = 0;
-                exceptions |= FPSCR_IOC;
+                exceptions |= FPSCR_IXC;
+            } else if (rmode == FPSCR_ROUND_MINUSINF) {
+                exceptions |= vsm.sign ? FPSCR_IOC : FPSCR_IXC;
+            } else {
+                exceptions |= FPSCR_IXC;
             }
         }
     }
@@ -638,7 +653,7 @@ static u32 vfp_single_ftoui(ARMul_State* state, int sd, int unused, s32 m, u32 f
 
 static u32 vfp_single_ftouiz(ARMul_State* state, int sd, int unused, s32 m, u32 fpscr)
 {
-    return vfp_single_ftoui(state, sd, unused, m, FPSCR_ROUND_TOZERO);
+    return vfp_single_ftoui(state, sd, unused, m, (fpscr & ~FPSCR_RMODE_MASK) | FPSCR_ROUND_TOZERO);
 }
 
 static u32 vfp_single_ftosi(ARMul_State* state, int sd, int unused, s32 m, u32 fpscr)
@@ -648,7 +663,7 @@ static u32 vfp_single_ftosi(ARMul_State* state, int sd, int unused, s32 m, u32 f
     int rmode = fpscr & FPSCR_RMODE_MASK;
     int tm;
 
-    vfp_single_unpack(&vsm, m, &fpscr);
+    exceptions |= vfp_single_unpack(&vsm, m, fpscr);
     vfp_single_dump("VSM", &vsm);
 
     /*
@@ -661,7 +676,7 @@ static u32 vfp_single_ftosi(ARMul_State* state, int sd, int unused, s32 m, u32 f
     if (tm & VFP_NAN) {
         d = 0;
         exceptions |= FPSCR_IOC;
-    } else if (vsm.exponent >= 127 + 32) {
+    } else if (vsm.exponent >= 127 + 31) {
         /*
          * m >= 2^31-2^7: invalid
          */
@@ -675,7 +690,7 @@ static u32 vfp_single_ftosi(ARMul_State* state, int sd, int unused, s32 m, u32 f
 
         /* 2^0 <= m <= 2^31-2^7 */
         d = (vsm.significand << 1) >> shift;
-        rem = vsm.significand << (33 - shift);
+        rem = (vsm.significand << 1) << (32 - shift);
 
         if (rmode == FPSCR_ROUND_NEAREST) {
             incr = 0x80000000;
@@ -701,10 +716,14 @@ static u32 vfp_single_ftosi(ARMul_State* state, int sd, int unused, s32 m, u32 f
         d = 0;
         if (vsm.exponent | vsm.significand) {
             exceptions |= FPSCR_IXC;
-            if (rmode == FPSCR_ROUND_PLUSINF && vsm.sign == 0)
+            if (rmode == FPSCR_ROUND_NEAREST) {
+                if (vsm.exponent >= 126)
+                    d = vsm.sign ? 0xffffffff : 1;
+            } else if (rmode == FPSCR_ROUND_PLUSINF && vsm.sign == 0) {
                 d = 1;
-            else if (rmode == FPSCR_ROUND_MINUSINF && vsm.sign)
-                d = -1;
+            } else if (rmode == FPSCR_ROUND_MINUSINF && vsm.sign) {
+                d = 0xffffffff;
+            }
         }
     }
 
@@ -717,7 +736,7 @@ static u32 vfp_single_ftosi(ARMul_State* state, int sd, int unused, s32 m, u32 f
 
 static u32 vfp_single_ftosiz(ARMul_State* state, int sd, int unused, s32 m, u32 fpscr)
 {
-    return vfp_single_ftosi(state, sd, unused, m, FPSCR_ROUND_TOZERO);
+    return vfp_single_ftosi(state, sd, unused, m, (fpscr & ~FPSCR_RMODE_MASK) | FPSCR_ROUND_TOZERO);
 }
 
 static struct op fops_ext[] = {
@@ -774,7 +793,7 @@ vfp_single_fadd_nonnumber(struct vfp_single *vsd, struct vfp_single *vsn,
             /*
              * different signs -> invalid
              */
-            exceptions = FPSCR_IOC;
+            exceptions |= FPSCR_IOC;
             vsp = &vfp_single_default_qnan;
         } else {
             /*
@@ -921,27 +940,27 @@ static u32
 vfp_single_multiply_accumulate(ARMul_State* state, int sd, int sn, s32 m, u32 fpscr, u32 negate, const char *func)
 {
     vfp_single vsd, vsp, vsn, vsm;
-    u32 exceptions;
+    u32 exceptions = 0;
     s32 v;
 
     v = vfp_get_float(state, sn);
     LOG_TRACE(Core_ARM11, "s%u = %08x", sn, v);
-    vfp_single_unpack(&vsn, v, &fpscr);
+    exceptions |= vfp_single_unpack(&vsn, v, fpscr);
     if (vsn.exponent == 0 && vsn.significand)
         vfp_single_normalise_denormal(&vsn);
 
-    vfp_single_unpack(&vsm, m, &fpscr);
+    exceptions |= vfp_single_unpack(&vsm, m, fpscr);
     if (vsm.exponent == 0 && vsm.significand)
         vfp_single_normalise_denormal(&vsm);
 
-    exceptions = vfp_single_multiply(&vsp, &vsn, &vsm, fpscr);
+    exceptions |= vfp_single_multiply(&vsp, &vsn, &vsm, fpscr);
 
     if (negate & NEG_MULTIPLY)
         vsp.sign = vfp_sign_negate(vsp.sign);
 
     v = vfp_get_float(state, sd);
     LOG_TRACE(Core_ARM11, "s%u = %08x", sd, v);
-    vfp_single_unpack(&vsn, v, &fpscr);
+    exceptions |= vfp_single_unpack(&vsn, v, fpscr);
     if (vsn.exponent == 0 && vsn.significand != 0)
         vfp_single_normalise_denormal(&vsn);
 
@@ -1000,20 +1019,20 @@ static u32 vfp_single_fnmsc(ARMul_State* state, int sd, int sn, s32 m, u32 fpscr
 static u32 vfp_single_fmul(ARMul_State* state, int sd, int sn, s32 m, u32 fpscr)
 {
     struct vfp_single vsd, vsn, vsm;
-    u32 exceptions;
+    u32 exceptions = 0;
     s32 n = vfp_get_float(state, sn);
 
     LOG_TRACE(Core_ARM11, "s%u = %08x", sn, n);
 
-    vfp_single_unpack(&vsn, n, &fpscr);
+    exceptions |= vfp_single_unpack(&vsn, n, fpscr);
     if (vsn.exponent == 0 && vsn.significand)
         vfp_single_normalise_denormal(&vsn);
 
-    vfp_single_unpack(&vsm, m, &fpscr);
+    exceptions |= vfp_single_unpack(&vsm, m, fpscr);
     if (vsm.exponent == 0 && vsm.significand)
         vfp_single_normalise_denormal(&vsm);
 
-    exceptions = vfp_single_multiply(&vsd, &vsn, &vsm, fpscr);
+    exceptions |= vfp_single_multiply(&vsd, &vsn, &vsm, fpscr);
     return vfp_single_normaliseround(state, sd, &vsd, fpscr, exceptions, "fmul");
 }
 
@@ -1023,20 +1042,20 @@ static u32 vfp_single_fmul(ARMul_State* state, int sd, int sn, s32 m, u32 fpscr)
 static u32 vfp_single_fnmul(ARMul_State* state, int sd, int sn, s32 m, u32 fpscr)
 {
     struct vfp_single vsd, vsn, vsm;
-    u32 exceptions;
+    u32 exceptions = 0;
     s32 n = vfp_get_float(state, sn);
 
     LOG_TRACE(Core_ARM11, "s%u = %08x", sn, n);
 
-    vfp_single_unpack(&vsn, n, &fpscr);
+    exceptions |= vfp_single_unpack(&vsn, n, fpscr);
     if (vsn.exponent == 0 && vsn.significand)
         vfp_single_normalise_denormal(&vsn);
 
-    vfp_single_unpack(&vsm, m, &fpscr);
+    exceptions |= vfp_single_unpack(&vsm, m, fpscr);
     if (vsm.exponent == 0 && vsm.significand)
         vfp_single_normalise_denormal(&vsm);
 
-    exceptions = vfp_single_multiply(&vsd, &vsn, &vsm, fpscr);
+    exceptions |= vfp_single_multiply(&vsd, &vsn, &vsm, fpscr);
     vsd.sign = vfp_sign_negate(vsd.sign);
     return vfp_single_normaliseround(state, sd, &vsd, fpscr, exceptions, "fnmul");
 }
@@ -1047,7 +1066,7 @@ static u32 vfp_single_fnmul(ARMul_State* state, int sd, int sn, s32 m, u32 fpscr
 static u32 vfp_single_fadd(ARMul_State* state, int sd, int sn, s32 m, u32 fpscr)
 {
     struct vfp_single vsd, vsn, vsm;
-    u32 exceptions;
+    u32 exceptions = 0;
     s32 n = vfp_get_float(state, sn);
 
     LOG_TRACE(Core_ARM11, "s%u = %08x", sn, n);
@@ -1055,15 +1074,15 @@ static u32 vfp_single_fadd(ARMul_State* state, int sd, int sn, s32 m, u32 fpscr)
     /*
      * Unpack and normalise denormals.
      */
-    vfp_single_unpack(&vsn, n, &fpscr);
+    exceptions |= vfp_single_unpack(&vsn, n, fpscr);
     if (vsn.exponent == 0 && vsn.significand)
         vfp_single_normalise_denormal(&vsn);
 
-    vfp_single_unpack(&vsm, m, &fpscr);
+    exceptions |= vfp_single_unpack(&vsm, m, fpscr);
     if (vsm.exponent == 0 && vsm.significand)
         vfp_single_normalise_denormal(&vsm);
 
-    exceptions = vfp_single_add(&vsd, &vsn, &vsm, fpscr);
+    exceptions |= vfp_single_add(&vsd, &vsn, &vsm, fpscr);
 
     return vfp_single_normaliseround(state, sd, &vsd, fpscr, exceptions, "fadd");
 }
@@ -1095,8 +1114,8 @@ static u32 vfp_single_fdiv(ARMul_State* state, int sd, int sn, s32 m, u32 fpscr)
 
     LOG_TRACE(Core_ARM11, "s%u = %08x", sn, n);
 
-    vfp_single_unpack(&vsn, n, &fpscr);
-    vfp_single_unpack(&vsm, m, &fpscr);
+    exceptions |= vfp_single_unpack(&vsn, n, fpscr);
+    exceptions |= vfp_single_unpack(&vsm, m, fpscr);
 
     vsd.sign = vsn.sign ^ vsm.sign;
 
@@ -1165,13 +1184,13 @@ static u32 vfp_single_fdiv(ARMul_State* state, int sd, int sn, s32 m, u32 fpscr)
     return vfp_single_normaliseround(state, sd, &vsd, fpscr, 0, "fdiv");
 
 vsn_nan:
-    exceptions = vfp_propagate_nan(&vsd, &vsn, &vsm, fpscr);
+    exceptions |= vfp_propagate_nan(&vsd, &vsn, &vsm, fpscr);
 pack:
     vfp_put_float(state, vfp_single_pack(&vsd), sd);
     return exceptions;
 
 vsm_nan:
-    exceptions = vfp_propagate_nan(&vsd, &vsm, &vsn, fpscr);
+    exceptions |= vfp_propagate_nan(&vsd, &vsm, &vsn, fpscr);
     goto pack;
 
 zero:
@@ -1180,7 +1199,7 @@ zero:
     goto pack;
 
 divzero:
-    exceptions = FPSCR_DZC;
+    exceptions |= FPSCR_DZC;
 infinity:
     vsd.exponent = 255;
     vsd.significand = 0;
