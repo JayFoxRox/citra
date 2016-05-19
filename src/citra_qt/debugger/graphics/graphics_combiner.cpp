@@ -21,6 +21,18 @@ GraphicsCombinerWidget::GraphicsCombinerWidget(std::shared_ptr<Pica::DebugContex
     auto main_widget = new QWidget;
     auto main_layout = new QVBoxLayout;
 
+    auto depth_group = new QGroupBox(tr("Depth"));
+    {
+        QVBoxLayout* vbox = new QVBoxLayout;
+
+        depth_label = new QLabel;
+        depth_label->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+        vbox->addWidget(depth_label);
+
+        depth_group->setLayout(vbox);
+    }
+    main_layout->addWidget(depth_group);
+
     auto tev_stages_group = new QGroupBox(tr("Tev stages"));
     {
         QVBoxLayout* vbox = new QVBoxLayout;
@@ -56,6 +68,14 @@ GraphicsCombinerWidget::GraphicsCombinerWidget(std::shared_ptr<Pica::DebugContex
 
 void GraphicsCombinerWidget::Reload() {
     const auto& regs = Pica::g_state.regs;
+
+    depth_label->setText(
+        QString("w-buffer: %0\n")
+            .arg((regs.depthmap_enable == Pica::Regs::DepthBuffering::WBuffering) ? "yes" : "no") +
+        QString("Depth offset: %0\n")
+            .arg(Pica::float24::FromRaw(regs.viewport_depth_near_plane).ToFloat32(), 0, 'e', 3) +
+        QString("Depth scale: %0")
+            .arg(Pica::float24::FromRaw(regs.viewport_depth_range).ToFloat32(), 0, 'e', 3));
 
     auto tev_stages = regs.GetTevStages();
     auto tev_stages_str = QString();
