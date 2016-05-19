@@ -5,6 +5,7 @@
 #include <QBoxLayout>
 #include <QGroupBox>
 #include <QLabel>
+#include <QScrollArea>
 #include <QSignalMapper>
 
 #include "citra_qt/debugger/graphics/graphics_combiner.h"
@@ -20,6 +21,9 @@ GraphicsCombinerWidget::GraphicsCombinerWidget(std::shared_ptr<Pica::DebugContex
 
     auto main_widget = new QWidget;
     auto main_layout = new QVBoxLayout;
+
+    auto main_scrollarea = new QScrollArea;
+    main_scrollarea->setFrameShape(QFrame::NoFrame);
 
     auto depth_group = new QGroupBox(tr("Depth"));
     {
@@ -60,8 +64,12 @@ GraphicsCombinerWidget::GraphicsCombinerWidget(std::shared_ptr<Pica::DebugContex
     }
     main_layout->addWidget(fog_group);
 
+    main_layout->setSizeConstraint(QLayout::SetMinimumSize);
     main_widget->setLayout(main_layout);
-    setWidget(main_widget);
+
+    main_scrollarea->setWidget(main_widget);
+
+    setWidget(main_scrollarea);
 
     widget()->setEnabled(false);
 }
