@@ -7,6 +7,8 @@
 #include <QAbstractListModel>
 #include <QDockWidget>
 
+#include "citra_qt/debugger/graphics_breakpoint_observer.h"
+
 #include "video_core/gpu_debugger.h"
 #include "video_core/debug_utils/debug_utils.h"
 
@@ -29,35 +31,38 @@ public:
     QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override;
     QVariant headerData(int section, Qt::Orientation orientation, int role = Qt::DisplayRole) const override;
 
-public slots:
-    void OnPicaTraceFinished(const Pica::DebugUtils::PicaTrace& trace);
-
-private:
-    Pica::DebugUtils::PicaTrace pica_trace;
+    friend class GPUCommandListWidget;
 };
 
-class GPUCommandListWidget : public QDockWidget
-{
+class GPUCommandListWidget : public BreakPointObserverDock {
     Q_OBJECT
 
+    using Event = Pica::DebugContext::Event;
+
 public:
-    GPUCommandListWidget(QWidget* parent = nullptr);
+    GPUCommandListWidget(std::shared_ptr<Pica::DebugContext> debug_context,
+                         QWidget* parent = nullptr);
 
 public slots:
-    void OnToggleTracing();
     void OnCommandDoubleClicked(const QModelIndex&);
 
     void SetCommandInfo(const QModelIndex&);
 
     void CopyAllToClipboard();
 
-signals:
-    void TracingFinished(const Pica::DebugUtils::PicaTrace&);
+private slots:
+    void OnBreakPointHit(Pica::DebugContext::Event event, void* data) override;
+    void OnResumed() override;
+
+    /**
+     * Reload widget based on the current PICA200 state
+     */
+    void Reload();
 
 private:
-    std::unique_ptr<Pica::DebugUtils::PicaTrace> pica_trace;
-
     QTreeView* list_widget;
     QWidget* command_info_widget;
-    QPushButton* toggle_tracing;
+    GPUCommandListModel* model;
+
+    friend class GPUCommandListModel;
 };

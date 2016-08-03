@@ -55,7 +55,7 @@ GPUCommandListModel::GPUCommandListModel(QObject* parent) : QAbstractListModel(p
 }
 
 int GPUCommandListModel::rowCount(const QModelIndex& parent) const {
-    return static_cast<int>(pica_trace.writes.size());
+    return Pica::g_state.regs.NumIds();
 }
 
 int GPUCommandListModel::columnCount(const QModelIndex& parent) const {
@@ -63,27 +63,27 @@ int GPUCommandListModel::columnCount(const QModelIndex& parent) const {
 }
 
 QVariant GPUCommandListModel::data(const QModelIndex& index, int role) const {
+#if 1
     if (!index.isValid())
         return QVariant();
 
-    const auto& write = pica_trace.writes[index.row()];
+    unsigned int reg_index = index.row();
+    u32 reg_value = Pica::g_state.regs[reg_index];
 
     if (role == Qt::DisplayRole) {
         QString content;
         switch ( index.column() ) {
         case 0:
-            return QString::fromLatin1(Pica::Regs::GetCommandName(write.cmd_id).c_str());
+            return QString::fromLatin1(Pica::Regs::GetCommandName(reg_index).c_str());
         case 1:
-            return QString("%1").arg(write.cmd_id, 3, 16, QLatin1Char('0'));
+            return QString("%1").arg(reg_index, 3, 16, QLatin1Char('0'));
         case 2:
-            return QString("%1").arg(write.mask, 4, 2, QLatin1Char('0'));
-        case 3:
-            return QString("%1").arg(write.value, 8, 16, QLatin1Char('0'));
+            return QString("%1").arg(reg_value, 8, 16, QLatin1Char('0'));
         }
     } else if (role == CommandIdRole) {
-        return QVariant::fromValue<int>(write.cmd_id);
+        return QVariant::fromValue<int>(reg_index);
     }
-
+#endif
     return QVariant();
 }
 
@@ -93,13 +93,11 @@ QVariant GPUCommandListModel::headerData(int section, Qt::Orientation orientatio
     {
         switch (section) {
         case 0:
-            return tr("Command Name");
+            return tr("Register Name");
         case 1:
             return tr("Register");
         case 2:
-            return tr("Mask");
-        case 3:
-            return tr("New Value");
+            return tr("Value");
         }
 
         break;
@@ -107,14 +105,6 @@ QVariant GPUCommandListModel::headerData(int section, Qt::Orientation orientatio
     }
 
     return QVariant();
-}
-
-void GPUCommandListModel::OnPicaTraceFinished(const Pica::DebugUtils::PicaTrace& trace) {
-    beginResetModel();
-
-    pica_trace = trace;
-
-    endResetModel();
 }
 
 #define COMMAND_IN_RANGE(cmd_id, reg_name)   \
@@ -179,9 +169,11 @@ void GPUCommandListWidget::SetCommandInfo(const QModelIndex& index) {
 }
 #undef COMMAND_IN_RANGE
 
-GPUCommandListWidget::GPUCommandListWidget(QWidget* parent) : QDockWidget(tr("Pica Command List"), parent) {
-    setObjectName("Pica Command List");
-    GPUCommandListModel* model = new GPUCommandListModel(this);
+GPUCommandListWidget::GPUCommandListWidget(std::shared_ptr< Pica::DebugContext > debug_context,
+                                                 QWidget* parent)
+        : BreakPointObserverDock(debug_context, "Pica Registers", parent) {
+    setObjectName("PicaRegisters");
+    model = new GPUCommandListModel(this);
 
     QWidget* main_widget = new QWidget;
 
@@ -202,13 +194,7 @@ GPUCommandListWidget::GPUCommandListWidget(QWidget* parent) : QDockWidget(tr("Pi
     connect(list_widget, SIGNAL(doubleClicked(const QModelIndex&)),
             this, SLOT(OnCommandDoubleClicked(const QModelIndex&)));
 
-    toggle_tracing = new QPushButton(tr("Start Tracing"));
     QPushButton* copy_all = new QPushButton(tr("Copy All"));
-
-    connect(toggle_tracing, SIGNAL(clicked()), this, SLOT(OnToggleTracing()));
-    connect(this, SIGNAL(TracingFinished(const Pica::DebugUtils::PicaTrace&)),
-            model, SLOT(OnPicaTraceFinished(const Pica::DebugUtils::PicaTrace&)));
-
     connect(copy_all, SIGNAL(clicked()), this, SLOT(CopyAllToClipboard()));
 
     command_info_widget = nullptr;
@@ -217,24 +203,69 @@ GPUCommandListWidget::GPUCommandListWidget(QWidget* parent) : QDockWidget(tr("Pi
     main_layout->addWidget(list_widget);
     {
         QHBoxLayout* sub_layout = new QHBoxLayout;
-        sub_layout->addWidget(toggle_tracing);
         sub_layout->addWidget(copy_all);
         main_layout->addLayout(sub_layout);
     }
     main_widget->setLayout(main_layout);
 
     setWidget(main_widget);
+
+    widget()->setEnabled(false);
 }
 
-void GPUCommandListWidget::OnToggleTracing() {
-    if (!Pica::DebugUtils::IsPicaTracing()) {
-        Pica::DebugUtils::StartPicaTracing();
-        toggle_tracing->setText(tr("Finish Tracing"));
-    } else {
-        pica_trace = Pica::DebugUtils::FinishPicaTracing();
-        emit TracingFinished(*pica_trace);
-        toggle_tracing->setText(tr("Start Tracing"));
+
+//FIXME: do in breakpoints..
+void GPUCommandListWidget::OnBreakPointHit(Pica::DebugContext::Event event, void* data) {
+// FIXME: Can do stuff like..   if (event == Pica::DebugContext::Event::VertexLoaded)
+    Reload();
+    widget()->setEnabled(true);
+}
+
+void GPUCommandListWidget::Reload() {
+    model->beginResetModel();
+
+#if 0
+    // Reload shader code
+    info.Clear();
+#endif
+
+#if 0
+    auto& shader_setup = Pica::g_state.vs;
+    auto& shader_config = Pica::g_state.regs.vs;
+    for (auto instr : shader_setup.program_code)
+        info.code.push_back({instr});
+    int num_attributes = Pica::g_state.regs.vertex_attributes.GetNumTotalAttributes();
+
+    for (auto pattern : shader_setup.swizzle_data)
+        info.swizzle_info.push_back({pattern});
+
+    u32 entry_point = Pica::g_state.regs.vs.main_offset;
+    info.labels.insert({ entry_point, "main" });
+
+    // Generate debug information
+    debug_data = Pica::Shader::ProduceDebugInfo(input_vertex, num_attributes, shader_config, shader_setup);
+
+    // Reload widget state
+    for (int attr = 0; attr < num_attributes; ++attr) {
+        unsigned source_attr = shader_config.input_register_map.GetRegisterForAttribute(attr);
+        input_data_mapping[attr]->setText(QString("-> v%1").arg(source_attr));
+        input_data_container[attr]->setVisible(true);
     }
+    // Only show input attributes which are used as input to the shader
+    for (unsigned int attr = num_attributes; attr < 16; ++attr) {
+        input_data_container[attr]->setVisible(false);
+    }
+
+    // Initialize debug info text for current cycle count
+    cycle_index->setMaximum(debug_data.records.size() - 1);
+    OnCycleIndexChanged(cycle_index->value());
+#endif
+
+    model->endResetModel();
+}
+
+void GPUCommandListWidget::OnResumed() {
+    widget()->setEnabled(false);
 }
 
 void GPUCommandListWidget::CopyAllToClipboard() {

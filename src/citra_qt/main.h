@@ -128,7 +128,6 @@ private:
     RegistersWidget* registersWidget;
     CallstackWidget* callstackWidget;
     GPUCommandStreamWidget* graphicsWidget;
-    GPUCommandListWidget* graphicsCommandsWidget;
 
     QAction* actions_recent_files[max_recent_files_item];
 };
