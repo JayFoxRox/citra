@@ -142,15 +142,6 @@ static const u8 NO_SRC_REG_SWIZZLE = 0x1b;
 /// Raw constant for the destination register enable mask that indicates all components are enabled
 static const u8 NO_DEST_REG_MASK = 0xf;
 
-/**
- * Get the vertex shader instruction for a given offset in the current shader program
- * @param offset Offset in the current shader program of the instruction
- * @return Instruction at the specified offset
- */
-static Instruction GetVertexShaderInstruction(size_t offset) {
-    return {g_state.vs.program_code[offset]};
-}
-
 static void LogCritical(const char* msg) {
     LOG_CRITICAL(HW_GPU, "%s", msg);
 }
@@ -223,7 +214,7 @@ void JitShader::Compile_SwizzleSrc(Instruction instr, unsigned src_num, SourceRe
         MOVAPS(dest, MDisp(src_ptr, src_offset_disp));
     }
 
-    SwizzlePattern swiz = {g_state.vs.swizzle_data[operand_desc_id]};
+    SwizzlePattern swiz = {setup->swizzle_data[operand_desc_id]};
 
     // Generate instructions for source register swizzling as needed
     u8 sel = swiz.GetRawSelector(src_num);
@@ -254,7 +245,7 @@ void JitShader::Compile_DestEnable(Instruction instr, X64Reg src) {
         dest = instr.common.dest.Value();
     }
 
-    SwizzlePattern swiz = {g_state.vs.swizzle_data[operand_desc_id]};
+    SwizzlePattern swiz = {setup->swizzle_data[operand_desc_id]};
 
     int dest_offset_disp = (int)UnitState<false>::OutputOffset(dest);
     ASSERT_MSG(dest_offset_disp == UnitState<false>::OutputOffset(dest),
@@ -515,7 +506,7 @@ void JitShader::Compile_MIN(Instruction instr) {
 }
 
 void JitShader::Compile_MOVA(Instruction instr) {
-    SwizzlePattern swiz = {g_state.vs.swizzle_data[instr.common.operand_desc_id]};
+    SwizzlePattern swiz = {setup->swizzle_data[instr.common.operand_desc_id]};
 
     if (!swiz.DestComponentEnabled(0) && !swiz.DestComponentEnabled(1)) {
         return; // NoOp
@@ -782,7 +773,7 @@ void JitShader::Compile_NextInstr() {
                "Tried to compile already compiled shader location!");
     code_ptr[program_counter] = GetCodePtr();
 
-    Instruction instr = GetVertexShaderInstruction(program_counter++);
+    Instruction instr = GetShaderInstruction(program_counter++);
 
     OpCode::Id opcode = instr.opcode.Value();
     auto instr_func = instr_table[static_cast<unsigned>(opcode)];
@@ -800,8 +791,8 @@ void JitShader::Compile_NextInstr() {
 void JitShader::FindReturnOffsets() {
     return_offsets.clear();
 
-    for (size_t offset = 0; offset < g_state.vs.program_code.size(); ++offset) {
-        Instruction instr = GetVertexShaderInstruction(offset);
+    for (size_t offset = 0; offset < setup->program_code.size(); ++offset) {
+        Instruction instr = GetShaderInstruction(offset);
 
         switch (instr.opcode.Value()) {
         case OpCode::Id::CALL:
@@ -819,7 +810,11 @@ void JitShader::FindReturnOffsets() {
     std::sort(return_offsets.begin(), return_offsets.end());
 }
 
-void JitShader::Compile() {
+void JitShader::Compile(const ShaderSetup& setup) {
+
+    // Get a pointer to the setup to access program_code and swizzle_data
+    this->setup = &setup;
+
     // Reset flow control state
     program = (CompiledShader*)GetCodePtr();
     program_counter = 0;
@@ -855,7 +850,7 @@ void JitShader::Compile() {
     JMPptr(R(ABI_PARAM3));
 
     // Compile entire program
-    Compile_Block(static_cast<unsigned>(g_state.vs.program_code.size()));
+    Compile_Block(static_cast<unsigned>(this->setup->program_code.size()));
 
     // Set the target for any incomplete branches now that the entire shader program has been
     // emitted
@@ -874,6 +869,9 @@ void JitShader::Compile() {
     ASSERT_MSG(size <= MAX_SHADER_SIZE, "Compiled a shader that exceeds the allocated size!");
 
     LOG_DEBUG(HW_GPU, "Compiled shader size=%lu", size);
+
+    // We don't need the setup anymore
+    this->setup = nullptr;
 }
 
 JitShader::JitShader() {

@@ -26,6 +26,12 @@ namespace Pica {
 
 namespace Shader {
 
+#ifdef ARCHITECTURE_x86_64
+// Forward declare JitShader because shader_jit_x64.h requires ShaderSetup
+// (which uses JitShader) from this file
+class JitShader;
+#endif // ARCHITECTURE_x86_64
+
 struct InputVertex {
     alignas(16) Math::Vec4<float24> attr[16];
 };
@@ -352,6 +358,10 @@ struct ShaderSetup {
     std::array<u32, 1024> program_code;
     std::array<u32, 1024> swizzle_data;
 
+#ifdef ARCHITECTURE_x86_64
+    std::weak_ptr<const JitShader> jit_shader;
+#endif
+
     /**
      * Performs any shader unit setup that only needs to happen once per shader (as opposed to once
      * per vertex, which would happen within the `Run` function).
@@ -363,19 +373,20 @@ struct ShaderSetup {
      * @param state Shader unit state, must be setup per shader and per shader unit
      * @param input Input vertex into the shader
      * @param num_attributes The number of vertex shader attributes
+     * @param config Configuration object for the shader pipeline
      */
-    void Run(UnitState<false>& state, const InputVertex& input, int num_attributes);
+    void Run(UnitState<false>& state, const InputVertex& input, int num_attributes,
+             const Regs::ShaderConfig& config);
 
     /**
      * Produce debug information based on the given shader and input vertex
      * @param input Input vertex into the shader
      * @param num_attributes The number of vertex shader attributes
      * @param config Configuration object for the shader pipeline
-     * @param setup Setup object for the shader pipeline
      * @return Debug information for this shader with regards to the given vertex
      */
     DebugData<true> ProduceDebugInfo(const InputVertex& input, int num_attributes,
-                                     const Regs::ShaderConfig& config, const ShaderSetup& setup);
+                                     const Regs::ShaderConfig& config);
 };
 
 } // namespace Shader

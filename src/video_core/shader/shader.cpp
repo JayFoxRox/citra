@@ -77,8 +77,7 @@ OutputVertex OutputRegisters::ToVertex(const Regs::ShaderConfig& config) {
 }
 
 #ifdef ARCHITECTURE_x86_64
-static std::unordered_map<u64, std::unique_ptr<JitShader>> shader_map;
-static const JitShader* jit_shader;
+static std::unordered_map<u64, std::shared_ptr<JitShader>> shader_map;
 #endif // ARCHITECTURE_x86_64
 
 void ClearCache() {
@@ -90,17 +89,16 @@ void ClearCache() {
 void ShaderSetup::Setup() {
 #ifdef ARCHITECTURE_x86_64
     if (VideoCore::g_shader_jit_enabled) {
-        u64 cache_key =
-            Common::ComputeHash64(&g_state.vs.program_code, sizeof(g_state.vs.program_code)) ^
-            Common::ComputeHash64(&g_state.vs.swizzle_data, sizeof(g_state.vs.swizzle_data));
+        u64 cache_key = (Common::ComputeHash64(&program_code, sizeof(program_code)) ^
+                         Common::ComputeHash64(&swizzle_data, sizeof(swizzle_data)));
 
         auto iter = shader_map.find(cache_key);
         if (iter != shader_map.end()) {
-            jit_shader = iter->second.get();
+            jit_shader = iter->second;
         } else {
-            auto shader = std::make_unique<JitShader>();
-            shader->Compile();
-            jit_shader = shader.get();
+            auto shader = std::make_shared<JitShader>();
+            shader->Compile(*this);
+            jit_shader = shader;
             shader_map[cache_key] = std::move(shader);
         }
     }
@@ -109,9 +107,8 @@ void ShaderSetup::Setup() {
 
 MICROPROFILE_DEFINE(GPU_Shader, "GPU", "Shader", MP_RGB(50, 50, 240));
 
-void ShaderSetup::Run(UnitState<false>& state, const InputVertex& input, int num_attributes) {
-    auto& config = g_state.regs.vs;
-    auto& setup = g_state.vs;
+void ShaderSetup::Run(UnitState<false>& state, const InputVertex& input, int num_attributes,
+                      const Regs::ShaderConfig& config) {
 
     MICROPROFILE_SCOPE(GPU_Shader);
 
@@ -129,17 +126,16 @@ void ShaderSetup::Run(UnitState<false>& state, const InputVertex& input, int num
 
 #ifdef ARCHITECTURE_x86_64
     if (VideoCore::g_shader_jit_enabled)
-        jit_shader->Run(setup, state, config.main_offset);
+        jit_shader.lock().get()->Run(*this, state, config.main_offset);
     else
-        RunInterpreter(setup, state, config.main_offset);
+        RunInterpreter(*this, state, config.main_offset);
 #else
-    RunInterpreter(setup, state, config.main_offset);
+    RunInterpreter(*this, state, config.main_offset);
 #endif // ARCHITECTURE_x86_64
 }
 
 DebugData<true> ShaderSetup::ProduceDebugInfo(const InputVertex& input, int num_attributes,
-                                              const Regs::ShaderConfig& config,
-                                              const ShaderSetup& setup) {
+                                              const Regs::ShaderConfig& config) {
     UnitState<true> state;
 
     state.debug.max_offset = 0;
@@ -154,7 +150,7 @@ DebugData<true> ShaderSetup::ProduceDebugInfo(const InputVertex& input, int num_
     state.conditional_code[0] = false;
     state.conditional_code[1] = false;
 
-    RunInterpreter(setup, state, config.main_offset);
+    RunInterpreter(*this, state, config.main_offset);
     return state.debug;
 }
 
