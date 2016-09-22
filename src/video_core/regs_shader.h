@@ -27,6 +27,8 @@ struct ShaderRegs {
     union {
         // Number of input attributes to shader unit - 1
         BitField<0, 4, u32> max_input_attribute_index;
+
+        BitField<24, 8, u32> use_geometry_shader;
     };
 
     // Offset to shader program entry point (in words)

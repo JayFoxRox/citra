@@ -136,7 +136,10 @@ ASSERT_REG_POSITION(pipeline.trigger_draw, 0x22e);
 ASSERT_REG_POSITION(pipeline.trigger_draw_indexed, 0x22f);
 ASSERT_REG_POSITION(pipeline.vs_default_attributes_setup, 0x232);
 ASSERT_REG_POSITION(pipeline.command_buffer, 0x238);
+ASSERT_REG_POSITION(pipeline.vs_com_mode, 0x244);
 ASSERT_REG_POSITION(pipeline.gpu_mode, 0x245);
+ASSERT_REG_POSITION(pipeline.vs_outmap_total1, 0x24A);
+ASSERT_REG_POSITION(pipeline.vs_outmap_total2, 0x251);
 ASSERT_REG_POSITION(pipeline.triangle_topology, 0x25e);
 ASSERT_REG_POSITION(pipeline.restart_primitive, 0x25f);
 

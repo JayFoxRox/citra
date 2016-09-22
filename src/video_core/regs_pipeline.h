@@ -147,7 +147,7 @@ struct PipelineRegs {
     // Number of vertices to render
     u32 num_vertices;
 
-    INSERT_PADDING_WORDS(0x1);
+    BitField<0, 2, u32> use_geometry_shader;
 
     // The index of the first vertex to render
     u32 vertex_offset;
@@ -202,7 +202,14 @@ struct PipelineRegs {
     /// Number of input attributes to the vertex shader minus 1
     BitField<0, 4, u32> max_input_attrib_index;
 
-    INSERT_PADDING_WORDS(2);
+    INSERT_PADDING_WORDS(1);
+
+    enum class VSComMode : u32 {
+        Shared = 0,
+        Exclusive = 1,
+    };
+
+    VSComMode vs_com_mode;
 
     enum class GPUMode : u32 {
         Drawing = 0,
@@ -211,7 +218,15 @@ struct PipelineRegs {
 
     GPUMode gpu_mode;
 
-    INSERT_PADDING_WORDS(0x18);
+    INSERT_PADDING_WORDS(0x4);
+
+    BitField<0, 4, u32> vs_outmap_total1;
+
+    INSERT_PADDING_WORDS(0x6);
+
+    BitField<0, 4, u32> vs_outmap_total2;
+
+    INSERT_PADDING_WORDS(0xC);
 
     enum class TriangleTopology : u32 {
         List = 0,
@@ -220,7 +235,10 @@ struct PipelineRegs {
         Shader = 3, // Programmable setup unit implemented in a geometry shader
     };
 
-    BitField<8, 2, TriangleTopology> triangle_topology;
+    union {
+        BitField<0, 4, u32> vs_outmap_count;
+        BitField<8, 2, TriangleTopology> triangle_topology;
+    };
 
     u32 restart_primitive;
 
