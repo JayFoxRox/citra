@@ -310,6 +310,71 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
         break;
     }
 
+    case PICA_REG_INDEX(gs.bool_uniforms):
+        Shader::WriteUniformBoolReg(true, value);
+        break;
+
+    case PICA_REG_INDEX_WORKAROUND(gs.int_uniforms[0], 0x281):
+    case PICA_REG_INDEX_WORKAROUND(gs.int_uniforms[1], 0x282):
+    case PICA_REG_INDEX_WORKAROUND(gs.int_uniforms[2], 0x283):
+    case PICA_REG_INDEX_WORKAROUND(gs.int_uniforms[3], 0x284): {
+        unsigned index = (id - PICA_REG_INDEX_WORKAROUND(gs.int_uniforms[0], 0x281));
+        auto values = regs.gs.int_uniforms[index];
+        Shader::WriteUniformIntReg(true, index,
+                                   Math::Vec4<u8>(values.x, values.y, values.z, values.w));
+        break;
+    }
+
+    case PICA_REG_INDEX_WORKAROUND(gs.uniform_setup.setup, 0x290):
+        Shader::WriteUniformFloatSetupReg(true, value);
+        break;
+
+    case PICA_REG_INDEX_WORKAROUND(gs.uniform_setup.set_value[0], 0x291):
+    case PICA_REG_INDEX_WORKAROUND(gs.uniform_setup.set_value[1], 0x292):
+    case PICA_REG_INDEX_WORKAROUND(gs.uniform_setup.set_value[2], 0x293):
+    case PICA_REG_INDEX_WORKAROUND(gs.uniform_setup.set_value[3], 0x294):
+    case PICA_REG_INDEX_WORKAROUND(gs.uniform_setup.set_value[4], 0x295):
+    case PICA_REG_INDEX_WORKAROUND(gs.uniform_setup.set_value[5], 0x296):
+    case PICA_REG_INDEX_WORKAROUND(gs.uniform_setup.set_value[6], 0x297):
+    case PICA_REG_INDEX_WORKAROUND(gs.uniform_setup.set_value[7], 0x298): {
+        Shader::WriteUniformFloatReg(true, value);
+        break;
+    }
+
+    // Load shader program code
+    case PICA_REG_INDEX_WORKAROUND(gs.program.offset, 0x29b):
+        Shader::WriteProgramCodeOffset(true, value);
+        break;
+
+    case PICA_REG_INDEX_WORKAROUND(gs.program.set_word[0], 0x29c):
+    case PICA_REG_INDEX_WORKAROUND(gs.program.set_word[1], 0x29d):
+    case PICA_REG_INDEX_WORKAROUND(gs.program.set_word[2], 0x29e):
+    case PICA_REG_INDEX_WORKAROUND(gs.program.set_word[3], 0x29f):
+    case PICA_REG_INDEX_WORKAROUND(gs.program.set_word[4], 0x2a0):
+    case PICA_REG_INDEX_WORKAROUND(gs.program.set_word[5], 0x2a1):
+    case PICA_REG_INDEX_WORKAROUND(gs.program.set_word[6], 0x2a2):
+    case PICA_REG_INDEX_WORKAROUND(gs.program.set_word[7], 0x2a3): {
+        Shader::WriteProgramCode(true, value);
+        break;
+    }
+
+    // Load swizzle pattern data
+    case PICA_REG_INDEX_WORKAROUND(gs.swizzle_patterns.offset, 0x2a5):
+        Shader::WriteSwizzlePatternsOffset(true, value);
+        break;
+
+    case PICA_REG_INDEX_WORKAROUND(gs.swizzle_patterns.set_word[0], 0x2a6):
+    case PICA_REG_INDEX_WORKAROUND(gs.swizzle_patterns.set_word[1], 0x2a7):
+    case PICA_REG_INDEX_WORKAROUND(gs.swizzle_patterns.set_word[2], 0x2a8):
+    case PICA_REG_INDEX_WORKAROUND(gs.swizzle_patterns.set_word[3], 0x2a9):
+    case PICA_REG_INDEX_WORKAROUND(gs.swizzle_patterns.set_word[4], 0x2aa):
+    case PICA_REG_INDEX_WORKAROUND(gs.swizzle_patterns.set_word[5], 0x2ab):
+    case PICA_REG_INDEX_WORKAROUND(gs.swizzle_patterns.set_word[6], 0x2ac):
+    case PICA_REG_INDEX_WORKAROUND(gs.swizzle_patterns.set_word[7], 0x2ad): {
+        Shader::WriteSwizzlePatterns(true, value);
+        break;
+    }
+
     case PICA_REG_INDEX(vs.bool_uniforms):
         Shader::WriteUniformBoolReg(false, value);
         break;
