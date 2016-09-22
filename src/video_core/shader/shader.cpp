@@ -160,6 +160,29 @@ bool SharedGS() {
     return g_state.regs.vs_com_mode == Pica::Regs::VSComMode::Shared;
 }
 
+bool UseGS() {
+    // TODO(ds84182): This would be more accurate if it looked at induvidual
+    // shader units for the geoshader bit
+    // gs_regs.input_buffer_config.use_geometry_shader == 0x08
+    ASSERT((g_state.regs.using_geometry_shader == 0) || (g_state.regs.using_geometry_shader == 2));
+    return g_state.regs.using_geometry_shader == 2;
+}
+
+UnitState<false>& GetShaderUnit(bool gs) {
+
+    // GS are always run on shader unit 3
+    if (gs) {
+        return g_state.shader_units[3];
+    }
+
+    // The worst scheduler you'll ever see!
+    // TODO: How does PICA shader scheduling work?
+    static unsigned shader_unit_scheduler = 0;
+    shader_unit_scheduler++;
+    shader_unit_scheduler %= 3; // TODO: When does it also allow use of unit 3?!
+    return g_state.shader_units[shader_unit_scheduler];
+}
+
 void WriteUniformBoolReg(bool gs, u32 value) {
     auto& setup = gs ? g_state.gs : g_state.vs;
 

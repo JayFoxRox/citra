@@ -410,6 +410,8 @@ struct ShaderSetup {
 };
 
 bool SharedGS();
+bool UseGS();
+UnitState<false>& GetShaderUnit(bool gs);
 void WriteUniformBoolReg(bool gs, u32 value);
 void WriteUniformIntReg(bool gs, unsigned index, const Math::Vec4<u8>& values);
 void WriteUniformFloatSetupReg(bool gs, u32 value);
