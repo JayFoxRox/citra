@@ -12,11 +12,12 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QRadioButton>
 #include <QSignalMapper>
 #include <QSpinBox>
 #include <QTreeView>
 
-#include "citra_qt/debugger/graphics_vertex_shader.h"
+#include "citra_qt/debugger/graphics_shader.h"
 #include "citra_qt/util/util.h"
 
 #include "video_core/pica.h"
@@ -285,7 +286,19 @@ QVariant GraphicsVertexShaderModel::data(const QModelIndex& index, int role) con
             }
 
             default:
-                output << " (unknown instruction format)";
+
+                switch (opcode.EffectiveOpCode()) {
+                case OpCode::Id::SETEMIT:
+                    output << " ("
+                           << "vertex_id: " << instr.setemit.vertex_id << "; "
+                           << "prim_emit: " << (instr.setemit.prim_emit ? "yes" : "no") << "; "
+                           << "winding: " << (instr.setemit.winding ? "ccw" : "cw") << ")"; //FIXME: Is this the correct way around?
+                    break;
+
+                default:
+                    output << " (unknown instruction format)";
+                    break;
+                }
                 break;
             }
 
@@ -347,8 +360,8 @@ void GraphicsVertexShaderWidget::DumpShader() {
 
 GraphicsVertexShaderWidget::GraphicsVertexShaderWidget(std::shared_ptr< Pica::DebugContext > debug_context,
                                                        QWidget* parent)
-        : BreakPointObserverDock(debug_context, "Pica Vertex Shader", parent) {
-    setObjectName("PicaVertexShader");
+        : BreakPointObserverDock(debug_context, "Pica Shader Units", parent) {
+    setObjectName("PicaShaderUnits");
 
     // Clear input vertex data so that it contains valid float values in case a debug shader
     // execution happens before the first Vertex Loaded breakpoint.
@@ -365,7 +378,8 @@ GraphicsVertexShaderWidget::GraphicsVertexShaderWidget(std::shared_ptr< Pica::De
         input_data[i]->setValidator(new QDoubleValidator(input_data[i]));
     }
 
-    breakpoint_warning = new QLabel(tr("(data only available at vertex shader invocation breakpoints)"));
+    breakpoint_warning = new QLabel(tr("(data only available at shader invocation breakpoints)"));
+    no_output_vertices_warning = new QLabel(tr("(no vertices emitted)"));
 
     // TODO: Add some button for jumping to the shader entry point
 
@@ -381,9 +395,13 @@ GraphicsVertexShaderWidget::GraphicsVertexShaderWidget(std::shared_ptr< Pica::De
 
     cycle_index = new QSpinBox;
 
+    vertex_index = new QSpinBox;
+
     connect(dump_shader, SIGNAL(clicked()), this, SLOT(DumpShader()));
 
     connect(cycle_index, SIGNAL(valueChanged(int)), this, SLOT(OnCycleIndexChanged(int)));
+
+    connect(vertex_index, SIGNAL(valueChanged(int)), this, SLOT(OnVertexIndexChanged(int)));
 
     for (unsigned i = 0; i < ARRAY_SIZE(input_data); ++i) {
         connect(input_data[i], SIGNAL(textEdited(const QString&)), input_data_mapper, SLOT(map()));
@@ -421,11 +439,65 @@ GraphicsVertexShaderWidget::GraphicsVertexShaderWidget(std::shared_ptr< Pica::De
             sub_layout->addWidget(input_data_container[i]);
         }
 
+        auto shader_unit_group = new QGroupBox(tr("Shader Unit"));
+        {
+            auto row_layout = new QHBoxLayout;
+            for (unsigned i = 0; i < 4; ++i) {
+                // Create an HBoxLayout to store the widgets used to specify a particular attribute
+                // and store it in a QWidget to allow for easy hiding and unhiding.
+                row_layout->setContentsMargins(0, 0, 0, 0);
+                row_layout->addWidget(new QRadioButton(tr("Unit %1").arg(i, 1)));
+            }
+            row_layout->addWidget(new QRadioButton(tr("Active (None)")));
+            shader_unit_group->setLayout(row_layout);
+        }
+
+        main_layout->addWidget(shader_unit_group);
+
         sub_layout->addWidget(breakpoint_warning);
         breakpoint_warning->hide();
 
         input_data_group->setLayout(sub_layout);
         main_layout->addWidget(input_data_group);
+    }
+    {
+        auto output_data_group = new QGroupBox(tr("Output Data"));
+
+        // For each output register, add a QHBoxLayout consisting of:
+        // - A QLabel denoting the source output register
+        // - A QLabel denoting the shader output component
+        auto sub_layout = new QVBoxLayout;
+
+        {
+            auto sub_sub_layout = new QFormLayout;
+            sub_sub_layout->addRow(tr("Vertex Index:"), vertex_index);
+            sub_layout->addLayout(sub_sub_layout);
+        }
+
+        for (unsigned i = 0; i < 7; ++i) {
+            // Create an HBoxLayout to store the widgets used to specify a particular attribute
+            // and store it in a QWidget to allow for easy hiding and unhiding.
+            auto row_layout = new QHBoxLayout;
+            // Remove unecessary padding between rows
+            row_layout->setContentsMargins(0, 0, 0, 0);
+
+            row_layout->addWidget(new QLabel(tr("o%1").arg(i)));
+            row_layout->addWidget(output_data_mapping[i] = new QLabel);
+
+            output_data_container[i] = new QWidget;
+            output_data_container[i]->setLayout(row_layout);
+            output_data_container[i]->hide();
+
+            sub_layout->addWidget(output_data_container[i]);
+        }
+
+        //TODO: add breakpoint warning
+
+        sub_layout->addWidget(no_output_vertices_warning);
+        no_output_vertices_warning->hide();
+
+        output_data_group->setLayout(sub_layout);
+        main_layout->addWidget(output_data_group);
     }
 
     // Make program listing expand to fill available space in the dialog
@@ -454,7 +526,7 @@ GraphicsVertexShaderWidget::GraphicsVertexShaderWidget(std::shared_ptr< Pica::De
 
 void GraphicsVertexShaderWidget::OnBreakPointHit(Pica::DebugContext::Event event, void* data) {
     auto input = static_cast<Pica::Shader::InputVertex*>(data);
-    if (event == Pica::DebugContext::Event::VertexShaderInvocation) {
+    if (event == Pica::DebugContext::Event::VertexShaderInvocation || event == Pica::DebugContext::Event::GeometryShaderInvocation) {
         Reload(true, data);
     } else {
         // No vertex data is retrievable => invalidate currently stored vertex data
@@ -488,8 +560,10 @@ void GraphicsVertexShaderWidget::Reload(bool replace_vertex_data, void* vertex_d
     // Reload shader code
     info.Clear();
 
-    auto& shader_setup = Pica::g_state.vs;
-    auto& shader_config = Pica::g_state.regs.vs;
+    bool show_gs = true;
+
+    auto& shader_setup = show_gs ? Pica::g_state.gs : Pica::g_state.vs;
+    auto& shader_config = show_gs ? Pica::g_state.regs.gs : Pica::g_state.regs.vs;
     for (auto instr : shader_setup.program_code)
         info.code.push_back({instr});
     int num_attributes = Pica::g_state.regs.vertex_attributes.GetNumTotalAttributes();
@@ -497,11 +571,31 @@ void GraphicsVertexShaderWidget::Reload(bool replace_vertex_data, void* vertex_d
     for (auto pattern : shader_setup.swizzle_data)
         info.swizzle_info.push_back({pattern});
 
-    u32 entry_point = Pica::g_state.regs.vs.main_offset;
+    u32 entry_point = shader_config.main_offset;
     info.labels.insert({ entry_point, "main" });
 
-    // Generate debug information
-    debug_data = Pica::g_state.vs.ProduceDebugInfo(input_vertex, num_attributes, shader_config, shader_setup);
+    // Generate debug information using a virtual shader unit
+    Pica::Shader::UnitState<true> shader_unit;
+    for (unsigned i = 0; i < ARRAY_SIZE(shader_unit.registers.temporary); i++) {
+        shader_unit.registers.temporary[i] = Pica::g_state.shader_units[3].registers.temporary[i];
+    }
+    if (show_gs) {
+        using Pica::Shader::OutputVertex;
+        auto AddTriangle = [&](
+            const OutputVertex& v0, const OutputVertex& v1, const OutputVertex& v2) {
+            output_vertices.push_back(v0);
+            output_vertices.push_back(v1);
+            output_vertices.push_back(v2);
+        };
+        shader_unit.emit_triangle_callback = AddTriangle;
+    }
+    output_vertices.clear();
+    debug_data = shader_setup.ProduceDebugInfo(shader_unit, input_vertex, num_attributes, shader_config);
+
+    // In vertex shader mode we automaticly emit a vertex at the end
+    if (!show_gs) {
+        output_vertices.push_back(shader_unit.output_registers.ToVertex(shader_config));
+    }
 
     // Reload widget state
     for (int attr = 0; attr < num_attributes; ++attr) {
@@ -514,9 +608,17 @@ void GraphicsVertexShaderWidget::Reload(bool replace_vertex_data, void* vertex_d
         input_data_container[attr]->setVisible(false);
     }
 
-    // Initialize debug info text for current cycle count
-    cycle_index->setMaximum(static_cast<int>(debug_data.records.size() - 1));
+    // Initialize debug info text for current cycle
+    cycle_index->setMaximum(debug_data.records.size() - 1);
     OnCycleIndexChanged(cycle_index->value());
+
+    // Show maximum vertex count
+    if (output_vertices.size() == 0) {
+        vertex_index->setMaximum(0);
+    } else {
+        vertex_index->setMaximum(output_vertices.size() - 1);
+    }
+    OnVertexIndexChanged(vertex_index->value());
 
     model->endResetModel();
 }
@@ -572,4 +674,77 @@ void GraphicsVertexShaderWidget::OnCycleIndexChanged(int index) {
     QModelIndex instr_index = model->index(record.instruction_offset, 0);
     emit model->dataChanged(instr_index, model->index(record.instruction_offset, model->columnCount()));
     binary_list->scrollTo(instr_index, QAbstractItemView::EnsureVisible);
+}
+
+void GraphicsVertexShaderWidget::OnVertexIndexChanged(int index) {
+    no_output_vertices_warning->setVisible(output_vertices.empty());
+
+    //TODO: (Clear all labels instead etc.)
+    if (output_vertices.empty())
+        return;
+
+    auto& output_vertex = output_vertices[index];
+
+    // Reload widget state
+    unsigned int enabled_output_index = 0;
+    for (int i = 0; i < 16; ++i) {
+
+        if (enabled_output_index >= Pica::g_state.regs.vs_output_total)
+            break;
+
+        //FIXME: GS support!
+        if ((Pica::g_state.regs.vs.output_mask & (1 << i)) == 0)
+            continue;
+
+        bool used = false;
+        std::string mapping = std::string("-> ");
+
+        auto& output = Pica::g_state.regs.vs_output_attributes[enabled_output_index];
+        Pica::Regs::VSOutputAttributes::Semantic map[] = {
+            output.map_x.Value(), output.map_y.Value(), output.map_z.Value(), output.map_w.Value()
+        };
+
+        for (unsigned comp = 0; comp < 4; ++comp) {
+
+            if (map[comp] == Pica::Regs::VSOutputAttributes::Semantic::INVALID)
+                continue;
+
+            std::string name;
+            float value = 0.0f; //FIXME: output_vertex[comp].ToFloat32();
+            switch(map[comp]) {
+                case Pica::Regs::VSOutputAttributes::Semantic::POSITION_X:   name = "pos.x";   value = output_vertex.pos.x.ToFloat32(); break;
+                case Pica::Regs::VSOutputAttributes::Semantic::POSITION_Y:   name = "pos.y";   value = output_vertex.pos.y.ToFloat32(); break;
+                case Pica::Regs::VSOutputAttributes::Semantic::POSITION_Z:   name = "pos.z";   value = output_vertex.pos.z.ToFloat32(); break;
+                case Pica::Regs::VSOutputAttributes::Semantic::POSITION_W:   name = "pos.w";   value = output_vertex.pos.w.ToFloat32(); break;
+                //FIXME: all of those
+                case Pica::Regs::VSOutputAttributes::Semantic::QUATERNION_X: name = "quat.x";  break;
+                case Pica::Regs::VSOutputAttributes::Semantic::QUATERNION_Y: name = "quat.y";  break;
+                case Pica::Regs::VSOutputAttributes::Semantic::QUATERNION_Z: name = "quat.z";  break;
+                case Pica::Regs::VSOutputAttributes::Semantic::QUATERNION_W: name = "quat.w";  break;
+                case Pica::Regs::VSOutputAttributes::Semantic::COLOR_R:      name = "color.r"; break;
+                case Pica::Regs::VSOutputAttributes::Semantic::COLOR_G:      name = "color.g"; break;
+                case Pica::Regs::VSOutputAttributes::Semantic::COLOR_B:      name = "color.b"; break;
+                case Pica::Regs::VSOutputAttributes::Semantic::COLOR_A:      name = "color.a"; break;
+                case Pica::Regs::VSOutputAttributes::Semantic::TEXCOORD0_U:  name = "tc0.u";   break;
+                case Pica::Regs::VSOutputAttributes::Semantic::TEXCOORD0_V:  name = "tc0.v";   break;
+                case Pica::Regs::VSOutputAttributes::Semantic::TEXCOORD1_U:  name = "tc1.u";   break;
+                case Pica::Regs::VSOutputAttributes::Semantic::TEXCOORD1_V:  name = "tc1.v";   break;
+                case Pica::Regs::VSOutputAttributes::Semantic::VIEW_X:       name = "view.x";  break;
+                case Pica::Regs::VSOutputAttributes::Semantic::VIEW_Y:       name = "view.y";  break;
+                case Pica::Regs::VSOutputAttributes::Semantic::VIEW_Z:       name = "view.z";  break;
+                case Pica::Regs::VSOutputAttributes::Semantic::TEXCOORD2_U:  name = "tc2.u";   break;
+                case Pica::Regs::VSOutputAttributes::Semantic::TEXCOORD2_V:  name = "tc2.v";   break;
+                default:
+                    name = std::string("Unknown[") + std::to_string(map[comp]) + std::string("]");
+                    break;
+            }
+            used = true;
+            // TODO: Check if we can and have to update this
+            mapping += std::string("{ ") + std::string(1, "xyzw"[comp]) + std::string(": ") + name + std::string(" = ") + std::to_string(value) + std::string(" }");
+        }
+        output_data_mapping[enabled_output_index]->setText(QString::fromStdString(mapping));
+        output_data_container[enabled_output_index]->setVisible(used);
+
+        enabled_output_index++;
+    }
 }
