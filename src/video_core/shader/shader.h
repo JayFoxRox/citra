@@ -199,6 +199,8 @@ ShaderEngine* GetEngine();
 void Shutdown();
 
 bool SharedGS();
+bool UseGS();
+UnitState& GetShaderUnit(bool gs);
 
 void HandleEMIT(UnitState& state);
 

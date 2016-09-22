@@ -113,6 +113,29 @@ bool SharedGS() {
     return g_state.regs.pipeline.vs_com_mode == Pica::PipelineRegs::VSComMode::Shared;
 }
 
+bool UseGS() {
+    // TODO(ds84182): This would be more accurate if it looked at induvidual
+    // shader units for the geoshader bit
+    // gs_regs.input_buffer_config.use_geometry_shader == 0x08
+    ASSERT((g_state.regs.pipeline.use_geometry_shader == 0) || (g_state.regs.pipeline.use_geometry_shader == 2));
+    return g_state.regs.pipeline.use_geometry_shader == 2;
+}
+
+UnitState& GetShaderUnit(bool gs) {
+
+    // GS are always run on shader unit 3
+    if (gs) {
+        return g_state.shader_units[3];
+    }
+
+    // The worst scheduler you'll ever see!
+    // TODO: How does PICA shader scheduling work?
+    static unsigned shader_unit_scheduler = 0;
+    shader_unit_scheduler++;
+    shader_unit_scheduler %= 3; // TODO: When does it also allow use of unit 3?!
+    return g_state.shader_units[shader_unit_scheduler];
+}
+
 void HandleEMIT(UnitState& state) {
     auto& config = g_state.regs.gs;
     auto& emit_params = state.emit_params;
