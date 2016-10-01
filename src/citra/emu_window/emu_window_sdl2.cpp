@@ -26,7 +26,8 @@ void EmuWindow_SDL2::OnMouseButton(u32 button, u8 state, s32 x, s32 y) {
         return;
 
     if (state == SDL_PRESSED) {
-        TouchPressed((unsigned)std::max(x, 0), (unsigned)std::max(y, 0));
+        TouchMoved((unsigned)std::max(x, 0), (unsigned)std::max(y, 0));
+        TouchPressed();
     } else {
         TouchReleased();
     }

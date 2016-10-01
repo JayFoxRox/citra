@@ -57,9 +57,19 @@ std::tuple<unsigned, unsigned> EmuWindow::ClipToTouchScreen(unsigned new_x, unsi
     return std::make_tuple(new_x, new_y);
 }
 
-void EmuWindow::TouchPressed(unsigned framebuffer_x, unsigned framebuffer_y) {
+void EmuWindow::TouchPressed() {
+    touch_pressed = true;
+    pad_state.touch.Assign(1);
+}
+
+void EmuWindow::TouchReleased() {
+    touch_pressed = false;
+    pad_state.touch.Assign(0);
+}
+
+void EmuWindow::TouchMoved(unsigned framebuffer_x, unsigned framebuffer_y) {
     if (!IsWithinTouchscreen(framebuffer_layout, framebuffer_x, framebuffer_y))
-        return;
+        std::tie(framebuffer_x, framebuffer_y) = ClipToTouchScreen(framebuffer_x, framebuffer_y);
 
     touch_x = VideoCore::kScreenBottomWidth *
               (framebuffer_x - framebuffer_layout.bottom_screen.left) /
@@ -67,26 +77,14 @@ void EmuWindow::TouchPressed(unsigned framebuffer_x, unsigned framebuffer_y) {
     touch_y = VideoCore::kScreenBottomHeight *
               (framebuffer_y - framebuffer_layout.bottom_screen.top) /
               (framebuffer_layout.bottom_screen.bottom - framebuffer_layout.bottom_screen.top);
-
-    touch_pressed = true;
-    pad_state.touch.Assign(1);
 }
 
-void EmuWindow::TouchReleased() {
-    touch_pressed = false;
-    touch_x = 0;
-    touch_y = 0;
-    pad_state.touch.Assign(0);
+void EmuWindow::DepthSliderChanged(float value) {
+    depth_slider = value;
 }
 
-void EmuWindow::TouchMoved(unsigned framebuffer_x, unsigned framebuffer_y) {
-    if (!touch_pressed)
-        return;
-
-    if (!IsWithinTouchscreen(framebuffer_layout, framebuffer_x, framebuffer_y))
-        std::tie(framebuffer_x, framebuffer_y) = ClipToTouchScreen(framebuffer_x, framebuffer_y);
-
-    TouchPressed(framebuffer_x, framebuffer_y);
+void EmuWindow::StereoscopicModeChanged(StereoscopicMode mode) {
+    stereoscopic_mode = mode;
 }
 
 EmuWindow::FramebufferLayout EmuWindow::FramebufferLayout::DefaultScreenLayout(unsigned width,

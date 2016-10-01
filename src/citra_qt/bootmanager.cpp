@@ -80,7 +80,9 @@ void EmuThread::run() {
 class GGLWidgetInternal : public QGLWidget {
 public:
     GGLWidgetInternal(QGLFormat fmt, GRenderWindow* parent)
-        : QGLWidget(fmt, parent), parent(parent) {}
+        : QGLWidget(fmt, parent), parent(parent) {
+        this->setMouseTracking(true);
+    }
 
     void paintEvent(QPaintEvent* ev) override {
         if (do_painting) {
@@ -114,6 +116,9 @@ GRenderWindow::GRenderWindow(QWidget* parent, EmuThread* emu_thread)
 
     keyboard_id = KeyMap::NewDeviceId();
     ReloadSetKeymaps();
+
+    this->setMouseTracking(true);
+    parent->setMouseTracking(true);
 }
 
 void GRenderWindow::moveContext() {
@@ -216,8 +221,9 @@ void GRenderWindow::mousePressEvent(QMouseEvent* event) {
     if (event->button() == Qt::LeftButton) {
         auto pos = event->pos();
         qreal pixelRatio = windowPixelRatio();
-        this->TouchPressed(static_cast<unsigned>(pos.x() * pixelRatio),
-                           static_cast<unsigned>(pos.y() * pixelRatio));
+        this->TouchMoved(std::max(static_cast<unsigned>(pos.x() * pixelRatio), 0u),
+                         std::max(static_cast<unsigned>(pos.y() * pixelRatio), 0u));
+        this->TouchPressed();
     }
 }
 

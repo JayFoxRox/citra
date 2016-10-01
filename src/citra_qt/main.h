@@ -17,6 +17,7 @@ class EmuThread;
 class ProfilerWidget;
 class MicroProfileDialog;
 class DisassemblerWidget;
+class StereoscopicControllerWidget;
 class RegistersWidget;
 class CallstackWidget;
 class GPUCommandStreamWidget;
@@ -108,6 +109,8 @@ private slots:
     void OnDisplayTitleBars(bool);
     void ToggleWindowMode();
     void OnCreateGraphicsSurfaceViewer();
+    void OnDepthChanged(float v);
+    void OnStereoscopeModeChanged(EmuWindow::StereoscopicMode);
 
 private:
     Ui::MainWindow ui;
@@ -120,6 +123,8 @@ private:
     // Whether emulation is currently running in Citra.
     bool emulation_running = false;
     std::unique_ptr<EmuThread> emu_thread;
+
+    StereoscopicControllerWidget* stereoscopicControllerWidget;
 
     ProfilerWidget* profilerWidget;
     MicroProfileDialog* microProfileDialog;
