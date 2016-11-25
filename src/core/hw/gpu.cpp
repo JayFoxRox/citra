@@ -112,8 +112,9 @@ static void MemoryFill(const Regs::MemoryFillConfig& config) {
     //       Then fill all completely covered surfaces, and return the
     //       regions that were between surfaces or within the touching
     //       ones for cpu to manually fill here.
-    if (VideoCore::g_renderer->Rasterizer()->AccelerateFill(config))
-        return;
+//    if (
+VideoCore::g_renderer->Rasterizer()->AccelerateFill(config);
+//        return;
 
     Memory::RasterizerFlushAndInvalidateRegion(config.GetStartAddress(),
                                                config.GetEndAddress() - config.GetStartAddress());
