@@ -326,7 +326,73 @@ CachedSurface* RasterizerCacheOpenGL::GetSurface(const CachedSurface& params, bo
         glActiveTexture(GL_TEXTURE0);
 
         glPixelStorei(GL_UNPACK_ROW_LENGTH, (GLint)new_surface->stride);
-        if (!new_surface->is_tiled) {
+
+
+        // Try to find match without good format
+        auto surface_interval =
+            boost::icl::interval<PAddr>::right_open(params.addr, params.addr + params_size);
+        auto range = surface_cache.equal_range(surface_interval);
+        for (auto it = range.first; it != range.second; ++it) {
+            for (auto it2 = it->second.begin(); it2 != it->second.end(); ++it2) {
+                CachedSurface* surface = it2->get();
+
+                // Check if the request matches the surface exactly
+                if (params.addr == surface->addr && params.width == surface->width &&
+                    params.height == surface->height) {
+                    // Make sure optional param-matching criteria are fulfilled
+                    bool tiling_match = (params.is_tiled == surface->is_tiled);
+                    bool res_scale_match = (params.res_scale_width == surface->res_scale_width &&
+                                            params.res_scale_height == surface->res_scale_height);
+                    if (!match_res_scale || res_scale_match) {
+                        // Prioritize same-tiling and highest resolution surfaces
+                        float match_goodness =
+                            (float)tiling_match + surface->res_scale_width * surface->res_scale_height;
+                        if (match_goodness > exact_surface_goodness || surface->dirty) {
+                            exact_surface_goodness = match_goodness;
+                            best_exact_surface = surface;
+                        }
+                    }
+                }
+            }
+        }
+
+        bool rescaled = false;
+
+        if (best_exact_surface != nullptr) {
+
+            // Pokemon POC: Depth FB D24X8 -> RGBA8
+
+            FormatTuple tuple = {GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE};
+
+            new_surface->width = best_exact_surface->width;
+            new_surface->height = best_exact_surface->height;
+            new_surface->stride = best_exact_surface->stride;
+            new_surface->res_scale_width = best_exact_surface->res_scale_width;
+            new_surface->res_scale_height = best_exact_surface->res_scale_height;
+            rescaled = true;
+
+            glPixelStorei(GL_UNPACK_ROW_LENGTH, (GLint)new_surface->stride);
+
+            std::vector<Math::Vec4<u8>> tex_buffer(new_surface->GetScaledWidth() * new_surface->GetScaledHeight());
+            {
+                OpenGLState cur_state = OpenGLState::GetCurState();
+                GLuint old_tex = cur_state.texture_units[0].texture_2d;
+
+                cur_state.texture_units[0].texture_2d = best_exact_surface->texture.handle;
+                cur_state.Apply();
+                glActiveTexture(GL_TEXTURE0);
+
+                glPixelStorei(GL_PACK_ROW_LENGTH, (GLint)best_exact_surface->stride);
+                glGetTexImage(GL_TEXTURE_2D, 0, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8, tex_buffer.data());
+                glPixelStorei(GL_PACK_ROW_LENGTH, 0);
+
+                cur_state.texture_units[0].texture_2d = old_tex;
+                cur_state.Apply();
+            }
+            glTexImage2D(GL_TEXTURE_2D, 0, tuple.internal_format, new_surface->GetScaledWidth(), new_surface->GetScaledHeight(), 0,
+                         tuple.format, tuple.type, tex_buffer.data());
+            printf("Created new texture!\n");
+        } else if (!new_surface->is_tiled) {
             // TODO: Ensure this will always be a color format, not a depth or other format
             ASSERT((size_t)new_surface->pixel_format < fb_format_tuples.size());
             const FormatTuple& tuple = fb_format_tuples[(unsigned int)params.pixel_format];
@@ -394,23 +460,25 @@ CachedSurface* RasterizerCacheOpenGL::GetSurface(const CachedSurface& params, bo
         glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
 
         // If not 1x scale, blit 1x texture to a new scaled texture and replace texture in surface
-        if (new_surface->res_scale_width != 1.f || new_surface->res_scale_height != 1.f) {
-            OGLTexture scaled_texture;
-            scaled_texture.Create();
+        if (!rescaled) {
+            if (new_surface->res_scale_width != 1.f || new_surface->res_scale_height != 1.f) {
+                OGLTexture scaled_texture;
+                scaled_texture.Create();
 
-            AllocateSurfaceTexture(scaled_texture.handle, new_surface->pixel_format,
-                                   new_surface->GetScaledWidth(), new_surface->GetScaledHeight());
-            BlitTextures(new_surface->texture.handle, scaled_texture.handle,
-                         CachedSurface::GetFormatType(new_surface->pixel_format),
-                         MathUtil::Rectangle<int>(0, 0, new_surface->width, new_surface->height),
-                         MathUtil::Rectangle<int>(0, 0, new_surface->GetScaledWidth(),
-                                                  new_surface->GetScaledHeight()));
+                AllocateSurfaceTexture(scaled_texture.handle, new_surface->pixel_format,
+                                       new_surface->GetScaledWidth(), new_surface->GetScaledHeight());
+                BlitTextures(new_surface->texture.handle, scaled_texture.handle,
+                             CachedSurface::GetFormatType(new_surface->pixel_format),
+                             MathUtil::Rectangle<int>(0, 0, new_surface->width, new_surface->height),
+                             MathUtil::Rectangle<int>(0, 0, new_surface->GetScaledWidth(),
+                                                      new_surface->GetScaledHeight()));
 
-            new_surface->texture.Release();
-            new_surface->texture.handle = scaled_texture.handle;
-            scaled_texture.handle = 0;
-            cur_state.texture_units[0].texture_2d = new_surface->texture.handle;
-            cur_state.Apply();
+                new_surface->texture.Release();
+                new_surface->texture.handle = scaled_texture.handle;
+                scaled_texture.handle = 0;
+                cur_state.texture_units[0].texture_2d = new_surface->texture.handle;
+                cur_state.Apply();
+            }
         }
 
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
