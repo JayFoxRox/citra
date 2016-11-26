@@ -315,8 +315,6 @@ CachedSurface* RasterizerCacheOpenGL::GetSurface(const CachedSurface& params, bo
         // TODO: Consider attempting subrect match in existing surfaces and direct blit here instead
         // of memory upload below if that's a common scenario in some game
 
-        Memory::RasterizerFlushRegion(params.addr, params_size);
-
         // Load data from memory to the new surface
         OpenGLState cur_state = OpenGLState::GetCurState();
 
@@ -324,9 +322,6 @@ CachedSurface* RasterizerCacheOpenGL::GetSurface(const CachedSurface& params, bo
         cur_state.texture_units[0].texture_2d = new_surface->texture.handle;
         cur_state.Apply();
         glActiveTexture(GL_TEXTURE0);
-
-        glPixelStorei(GL_UNPACK_ROW_LENGTH, (GLint)new_surface->stride);
-
 
         // Try to find match without good format
         auto surface_interval =
@@ -356,8 +351,6 @@ CachedSurface* RasterizerCacheOpenGL::GetSurface(const CachedSurface& params, bo
             }
         }
 
-        bool rescaled = false;
-
         if (best_exact_surface != nullptr) {
 
             // Pokemon POC: Depth FB D24X8 -> RGBA8
@@ -369,11 +362,13 @@ CachedSurface* RasterizerCacheOpenGL::GetSurface(const CachedSurface& params, bo
             new_surface->stride = best_exact_surface->stride;
             new_surface->res_scale_width = best_exact_surface->res_scale_width;
             new_surface->res_scale_height = best_exact_surface->res_scale_height;
-            rescaled = true;
 
-            glPixelStorei(GL_UNPACK_ROW_LENGTH, (GLint)new_surface->stride);
+            OGLBuffer buffer;
+            buffer.Create();
 
-            std::vector<Math::Vec4<u8>> tex_buffer(new_surface->GetScaledWidth() * new_surface->GetScaledHeight());
+            glPixelStorei(GL_PACK_ROW_LENGTH, (GLint)best_exact_surface->stride);
+            glBindBuffer(GL_PIXEL_PACK_BUFFER, buffer.handle);
+            glBufferData(GL_PIXEL_PACK_BUFFER, new_surface->GetScaledWidth() * new_surface->GetScaledHeight() * 4, NULL, GL_STREAM_DRAW);
             {
                 OpenGLState cur_state = OpenGLState::GetCurState();
                 GLuint old_tex = cur_state.texture_units[0].texture_2d;
@@ -382,17 +377,32 @@ CachedSurface* RasterizerCacheOpenGL::GetSurface(const CachedSurface& params, bo
                 cur_state.Apply();
                 glActiveTexture(GL_TEXTURE0);
 
-                glPixelStorei(GL_PACK_ROW_LENGTH, (GLint)best_exact_surface->stride);
-                glGetTexImage(GL_TEXTURE_2D, 0, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8, tex_buffer.data());
-                glPixelStorei(GL_PACK_ROW_LENGTH, 0);
+                glGetTexImage(GL_TEXTURE_2D, 0, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8, 0);
 
                 cur_state.texture_units[0].texture_2d = old_tex;
                 cur_state.Apply();
             }
+            glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+            glPixelStorei(GL_PACK_ROW_LENGTH, 0);
+
+            glPixelStorei(GL_UNPACK_ROW_LENGTH, (GLint)new_surface->stride);
+            glBindBuffer(GL_PIXEL_UNPACK_BUFFER, buffer.handle);
             glTexImage2D(GL_TEXTURE_2D, 0, tuple.internal_format, new_surface->GetScaledWidth(), new_surface->GetScaledHeight(), 0,
-                         tuple.format, tuple.type, tex_buffer.data());
+                         tuple.format, tuple.type, 0);
+            glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+            glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
             printf("Created new texture!\n");
-        } else if (!new_surface->is_tiled) {
+
+            goto rescaled;
+
+        }
+
+        Memory::RasterizerFlushRegion(params.addr, params_size);
+        printf("Flushed!\n");
+
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, (GLint)new_surface->stride);
+
+        if (!new_surface->is_tiled) {
             // TODO: Ensure this will always be a color format, not a depth or other format
             ASSERT((size_t)new_surface->pixel_format < fb_format_tuples.size());
             const FormatTuple& tuple = fb_format_tuples[(unsigned int)params.pixel_format];
@@ -460,26 +470,26 @@ CachedSurface* RasterizerCacheOpenGL::GetSurface(const CachedSurface& params, bo
         glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
 
         // If not 1x scale, blit 1x texture to a new scaled texture and replace texture in surface
-        if (!rescaled) {
-            if (new_surface->res_scale_width != 1.f || new_surface->res_scale_height != 1.f) {
-                OGLTexture scaled_texture;
-                scaled_texture.Create();
+        if (new_surface->res_scale_width != 1.f || new_surface->res_scale_height != 1.f) {
+            OGLTexture scaled_texture;
+            scaled_texture.Create();
 
-                AllocateSurfaceTexture(scaled_texture.handle, new_surface->pixel_format,
-                                       new_surface->GetScaledWidth(), new_surface->GetScaledHeight());
-                BlitTextures(new_surface->texture.handle, scaled_texture.handle,
-                             CachedSurface::GetFormatType(new_surface->pixel_format),
-                             MathUtil::Rectangle<int>(0, 0, new_surface->width, new_surface->height),
-                             MathUtil::Rectangle<int>(0, 0, new_surface->GetScaledWidth(),
-                                                      new_surface->GetScaledHeight()));
+            AllocateSurfaceTexture(scaled_texture.handle, new_surface->pixel_format,
+                                   new_surface->GetScaledWidth(), new_surface->GetScaledHeight());
+            BlitTextures(new_surface->texture.handle, scaled_texture.handle,
+                         CachedSurface::GetFormatType(new_surface->pixel_format),
+                         MathUtil::Rectangle<int>(0, 0, new_surface->width, new_surface->height),
+                         MathUtil::Rectangle<int>(0, 0, new_surface->GetScaledWidth(),
+                                                  new_surface->GetScaledHeight()));
 
-                new_surface->texture.Release();
-                new_surface->texture.handle = scaled_texture.handle;
-                scaled_texture.handle = 0;
-                cur_state.texture_units[0].texture_2d = new_surface->texture.handle;
-                cur_state.Apply();
-            }
+            new_surface->texture.Release();
+            new_surface->texture.handle = scaled_texture.handle;
+            scaled_texture.handle = 0;
+            cur_state.texture_units[0].texture_2d = new_surface->texture.handle;
+            cur_state.Apply();
         }
+
+        rescaled:
 
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
