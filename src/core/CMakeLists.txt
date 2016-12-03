@@ -1,7 +1,6 @@
 set(SRCS
             arm/disassembler/arm_disasm.cpp
             arm/disassembler/load_symbol_map.cpp
-            arm/dynarmic/arm_dynarmic.cpp
             arm/dyncom/arm_dyncom.cpp
             arm/dyncom/arm_dyncom_dec.cpp
             arm/dyncom/arm_dyncom_interpreter.cpp
@@ -159,7 +158,6 @@ set(HEADERS
             arm/arm_interface.h
             arm/disassembler/arm_disasm.h
             arm/disassembler/load_symbol_map.h
-            arm/dynarmic/arm_dynarmic.h
             arm/dyncom/arm_dyncom.h
             arm/dyncom/arm_dyncom_dec.h
             arm/dyncom/arm_dyncom_interpreter.h
@@ -321,10 +319,20 @@ set(HEADERS
             system.h
             )
 
-include_directories(../../externals/dynarmic/include)
+if(ARCHITECTURE_x86_64)
+    set(SRCS ${SRCS}
+            arm/dynarmic/arm_dynarmic.cpp)
+
+    set(HEADERS ${HEADERS}
+            arm/dynarmic/arm_dynarmic.h)
+
+    include_directories(../../externals/dynarmic/include)
+endif()
 
 create_directory_groups(${SRCS} ${HEADERS})
 
 add_library(core STATIC ${SRCS} ${HEADERS})
 
-target_link_libraries(core dynarmic)
+if(ARCHITECTURE_x86_64)
+    target_link_libraries(core dynarmic)
+endif()

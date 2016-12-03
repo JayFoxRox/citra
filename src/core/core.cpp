@@ -5,7 +5,9 @@
 #include <memory>
 #include "common/logging/log.h"
 #include "core/arm/arm_interface.h"
+#ifdef ARCHITECTURE_x86_64
 #include "core/arm/dynarmic/arm_dynarmic.h"
+#endif // ARCHITECTURE_x86_64
 #include "core/arm/dyncom/arm_dyncom.h"
 #include "core/core.h"
 #include "core/core_timing.h"
@@ -71,6 +73,7 @@ void Stop() {
 
 /// Initialize the core
 void Init() {
+#ifdef ARCHITECTURE_x86_64
     if (Settings::values.use_cpu_jit) {
         g_sys_core = std::make_unique<ARM_Dynarmic>(USER32MODE);
         g_app_core = std::make_unique<ARM_Dynarmic>(USER32MODE);
@@ -78,6 +81,13 @@ void Init() {
         g_sys_core = std::make_unique<ARM_DynCom>(USER32MODE);
         g_app_core = std::make_unique<ARM_DynCom>(USER32MODE);
     }
+#else
+    if (Settings::values.use_cpu_jit) {
+        LOG_WARNING(Core, "Using CPU Interpreter. CPU JIT is activated in config but not available on current platform!");
+    }
+    g_sys_core = std::make_unique<ARM_DynCom>(USER32MODE);
+    g_app_core = std::make_unique<ARM_DynCom>(USER32MODE);
+#endif // ARCHITECTURE_x86_64
 
     LOG_DEBUG(Core, "Initialized OK");
 }
