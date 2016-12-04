@@ -85,11 +85,7 @@ set(UIS
 
 create_directory_groups(${SRCS} ${HEADERS} ${UIS})
 
-if (Qt5_FOUND)
-    qt5_wrap_ui(UI_HDRS ${UIS})
-else()
-    qt4_wrap_ui(UI_HDRS ${UIS})
-endif()
+qt5_wrap_ui(UI_HDRS ${UIS})
 
 if (APPLE)
     set(MACOSX_ICON "../../dist/citra.icns")
@@ -107,7 +103,7 @@ if(UNIX AND NOT APPLE)
     install(TARGETS citra-qt RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}/bin")
 endif()
 
-if (Qt5_FOUND AND MSVC)
+if (MSVC)
     include(WindowsCopyFiles)
 
     set(Qt5_DLL_DIR "${Qt5_DIR}/../../../bin")
