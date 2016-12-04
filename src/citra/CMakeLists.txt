@@ -27,12 +27,16 @@ if(UNIX AND NOT APPLE)
     install(TARGETS citra RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}/bin")
 endif()
 
-if (MSVC)
+if (WIN32)
     include(WindowsCopyFiles)
 
     set(DLL_DEST "${CMAKE_BINARY_DIR}/bin/$<CONFIG>/")
 
-    windows_copy_files(citra ${SDL2_DLL_DIR} ${DLL_DEST} SDL2.dll)
+    if (${SDL2_DLL_DIR})
+        windows_copy_files(citra ${SDL2_DLL_DIR} ${DLL_DEST}
+            SDL2.dll
+            )
+    endif()
 
     unset(DLL_DEST)
 endif()

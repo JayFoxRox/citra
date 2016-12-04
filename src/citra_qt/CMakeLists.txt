@@ -103,7 +103,7 @@ if(UNIX AND NOT APPLE)
     install(TARGETS citra-qt RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}/bin")
 endif()
 
-if (MSVC)
+if (WIN32)
     include(WindowsCopyFiles)
 
     set(Qt5_DLL_DIR "${Qt5_DIR}/../../../bin")
@@ -119,8 +119,10 @@ if (MSVC)
         Qt5Gui$<$<CONFIG:Debug>:d>.*
         Qt5OpenGL$<$<CONFIG:Debug>:d>.*
         Qt5Widgets$<$<CONFIG:Debug>:d>.*
-    )
-    windows_copy_files(citra-qt ${Qt5_PLATFORMS_DIR} ${PLATFORMS} qwindows$<$<CONFIG:Debug>:d>.*)
+        )
+    windows_copy_files(citra-qt ${Qt5_PLATFORMS_DIR} ${PLATFORMS}
+        qwindows$<$<CONFIG:Debug>:d>.*
+        )
 
     unset(Qt5_DLL_DIR)
     unset(Qt5_PLATFORMS_DIR)
