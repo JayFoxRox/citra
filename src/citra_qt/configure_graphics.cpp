@@ -14,6 +14,9 @@ ConfigureGraphics::ConfigureGraphics(QWidget* parent)
     this->setConfiguration();
 
     ui->toggle_vsync->setEnabled(!System::IsPoweredOn());
+#ifndef ARCHITECTURE_x86_64
+    ui->toggle_shader_jit->hide();
+#endif // ARCHITECTURE_x86_64
 }
 
 ConfigureGraphics::~ConfigureGraphics() {}
