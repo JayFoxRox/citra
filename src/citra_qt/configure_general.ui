@@ -25,6 +25,26 @@
         <item>
          <layout class="QVBoxLayout" name="verticalLayout_2">
           <item>
+           <layout class="QHBoxLayout" name="horizontalLayout_6">
+            <item>
+             <widget class="QLabel" name="label2">
+              <property name="text">
+               <string>Language:</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QComboBox" name="language_combobox">
+              <item>
+               <property name="text">
+                <string notr="true">dummy</string>
+               </property>
+              </item>
+             </widget>
+            </item>
+           </layout>
+          </item>
+          <item>
            <widget class="QCheckBox" name="toggle_deepscan">
             <property name="text">
              <string>Recursive scan for game folder</string>
