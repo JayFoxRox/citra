@@ -9,17 +9,18 @@
 
 #include "core/core_timing.h"
 
-#include "input_core/input_core.h"
 #include "input_core/devices/keyboard.h"
 #include "input_core/devices/sdl_gamepad.h"
+#include "input_core/input_core.h"
 
 namespace InputCore {
 constexpr u64 frame_ticks = 268123480ull / 60;
 static int tick_event;
 static Service::HID::PadState pad_state;
-static std::tuple<s16, s16> circle_pad = { 0,0 };
+static std::tuple<s16, s16> circle_pad = {0, 0};
 static std::shared_ptr<Keyboard> main_keyboard; ///< Keyboard is always active for Citra
-static std::vector<std::shared_ptr<IDevice>> devices; ///< Devices that are handling input for the game
+static std::vector<std::shared_ptr<IDevice>>
+    devices; ///< Devices that are handling input for the game
 static std::mutex pad_state_mutex;
 static std::mutex touch_mutex;
 static u16 touch_x;        ///< Touchpad X-position in native 3DS pixel coordinates (0-320)
@@ -71,10 +72,10 @@ void SetTouchState(std::tuple<u16, u16, bool> value) {
 }
 
 /// Helper method to check if device was already initialized
-bool CheckIfMappingExists(const std::vector<Settings::InputDeviceMapping>& uniqueMapping, Settings::InputDeviceMapping mappingToCheck) {
-    return std::any_of(uniqueMapping.begin(), uniqueMapping.end(), [mappingToCheck](const auto& mapping) {
-        return mapping == mappingToCheck;
-    });
+bool CheckIfMappingExists(const std::vector<Settings::InputDeviceMapping>& uniqueMapping,
+                          Settings::InputDeviceMapping mappingToCheck) {
+    return std::any_of(uniqueMapping.begin(), uniqueMapping.end(),
+                       [mappingToCheck](const auto& mapping) { return mapping == mappingToCheck; });
 }
 
 /// Get Unique input mappings from settings
@@ -90,7 +91,8 @@ static std::vector<Settings::InputDeviceMapping> GatherUniqueMappings() {
 }
 
 /// Builds map of input keys to 3ds buttons for unique device
-static std::map<std::string, std::vector<Service::HID::PadState>> BuildKeyMapping(Settings::InputDeviceMapping mapping) {
+static std::map<std::string, std::vector<Service::HID::PadState>> BuildKeyMapping(
+    Settings::InputDeviceMapping mapping) {
     std::map<std::string, std::vector<Service::HID::PadState>> keyMapping;
     for (size_t i = 0; i < Settings::values.input_mappings.size(); i++) {
         Service::HID::PadState val = KeyMap::mapping_targets[i];
@@ -108,20 +110,17 @@ static void GenerateUniqueDevices(const std::vector<Settings::InputDeviceMapping
     std::shared_ptr<IDevice> input;
     for (const auto& mapping : uniqueMappings) {
         switch (mapping.framework) {
-        case Settings::DeviceFramework::Qt:
-        {
+        case Settings::DeviceFramework::Qt: {
             main_keyboard = std::make_shared<Keyboard>();
             input = main_keyboard;
             break;
         }
-        case Settings::DeviceFramework::SDL:
-        {
+        case Settings::DeviceFramework::SDL: {
             if (mapping.device == Settings::Device::Keyboard) {
                 main_keyboard = std::make_shared<Keyboard>();
                 input = main_keyboard;
                 break;
-            }
-            else if (mapping.device == Settings::Device::Gamepad) {
+            } else if (mapping.device == Settings::Device::Gamepad) {
                 input = std::make_shared<SDLGamepad>();
                 break;
             }
@@ -166,7 +165,9 @@ Settings::InputDeviceMapping DetectInput(int max_time, std::function<void(void)>
     auto start = std::chrono::high_resolution_clock::now();
     while (input_device.key == "") {
         update_GUI();
-        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start).count();
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::high_resolution_clock::now() - start)
+                            .count();
         if (duration >= max_time) {
             break;
         }

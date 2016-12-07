@@ -17,8 +17,8 @@
 #include "core/settings.h"
 #include "core/system.h"
 
-#include "input_core/input_core.h"
 #include "input_core/devices/keyboard.h"
+#include "input_core/input_core.h"
 
 #include "video_core/debug_utils/debug_utils.h"
 #include "video_core/video_core.h"
@@ -118,9 +118,10 @@ GRenderWindow::GRenderWindow(QWidget* parent, EmuThread* emu_thread)
 
     keyboard_id = 0;
 
-    // TODO: One of these flags might be interesting: WA_OpaquePaintEvent, WA_NoBackground, WA_DontShowOnScreen, WA_DeleteOnClose
+    // TODO: One of these flags might be interesting: WA_OpaquePaintEvent, WA_NoBackground,
+    // WA_DontShowOnScreen, WA_DeleteOnClose
     QGLFormat fmt;
-    fmt.setVersion(3,3);
+    fmt.setVersion(3, 3);
     fmt.setProfile(QGLFormat::CoreProfile);
     // Requests a forward-compatible context, which is required to get a 3.2+ context on OS X
     fmt.setOption(QGL::NoDeprecatedFunctions);
@@ -128,7 +129,8 @@ GRenderWindow::GRenderWindow(QWidget* parent, EmuThread* emu_thread)
     child = new GGLWidgetInternal(fmt, this);
     QBoxLayout* layout = new QHBoxLayout(this);
 
-    resize(VideoCore::kScreenTopWidth, VideoCore::kScreenTopHeight + VideoCore::kScreenBottomHeight);
+    resize(VideoCore::kScreenTopWidth,
+           VideoCore::kScreenTopHeight + VideoCore::kScreenBottomHeight);
     layout->addWidget(child);
     layout->setMargin(0);
     setLayout(layout);
@@ -136,10 +138,9 @@ GRenderWindow::GRenderWindow(QWidget* parent, EmuThread* emu_thread)
     OnMinimalClientAreaChangeRequest(GetActiveConfig().min_client_area_size);
 
     OnFramebufferSizeChanged();
-    NotifyClientAreaSizeChanged(std::pair<unsigned,unsigned>(child->width(), child->height()));
+    NotifyClientAreaSizeChanged(std::pair<unsigned, unsigned>(child->width(), child->height()));
 
     BackupGeometry();
-
 }
 
 void GRenderWindow::moveContext() {
@@ -228,17 +229,17 @@ void GRenderWindow::closeEvent(QCloseEvent* event) {
     QWidget::closeEvent(event);
 }
 
-void GRenderWindow::keyPressEvent(QKeyEvent* event)
-{
+void GRenderWindow::keyPressEvent(QKeyEvent* event) {
     auto keyboard = InputCore::GetKeyboard();
-    KeyboardKey param = KeyboardKey(event->key(), QKeySequence(event->key()).toString().toStdString());
+    KeyboardKey param =
+        KeyboardKey(event->key(), QKeySequence(event->key()).toString().toStdString());
     keyboard->KeyPressed(param);
 }
 
-void GRenderWindow::keyReleaseEvent(QKeyEvent* event)
-{
+void GRenderWindow::keyReleaseEvent(QKeyEvent* event) {
     auto keyboard = InputCore::GetKeyboard();
-    KeyboardKey param = KeyboardKey(event->key(), QKeySequence(event->key()).toString().toStdString());
+    KeyboardKey param =
+        KeyboardKey(event->key(), QKeySequence(event->key()).toString().toStdString());
     keyboard->KeyReleased(param);
 }
 
@@ -263,8 +264,7 @@ void GRenderWindow::mouseReleaseEvent(QMouseEvent* event) {
         this->TouchReleased();
 }
 
-void GRenderWindow::OnClientAreaResized(unsigned width, unsigned height)
-{
+void GRenderWindow::OnClientAreaResized(unsigned width, unsigned height) {
     NotifyClientAreaSizeChanged(std::make_pair(width, height));
 }
 

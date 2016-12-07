@@ -20,7 +20,8 @@ public:
      * @param keymap: vector of PadStates for device to listen for
      * @return true if successful
      */
-    virtual bool InitDevice(int number, const std::map<std::string, std::vector<Service::HID::PadState>>& keyMap) = 0;
+    virtual bool InitDevice(
+        int number, const std::map<std::string, std::vector<Service::HID::PadState>>& keyMap) = 0;
 
     /**
      * Process inputs that were pressed since last frame
@@ -43,6 +44,8 @@ public:
      * Clears info from last frame.
      */
     virtual void Clear() = 0;
+
 protected:
-    std::map<std::string, std::vector<Service::HID::PadState>> key_mapping; ///< Maps the string in the settings file to the HID Padstate object
+    std::map<std::string, std::vector<Service::HID::PadState>>
+        key_mapping; ///< Maps the string in the settings file to the HID Padstate object
 };

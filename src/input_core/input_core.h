@@ -50,7 +50,8 @@ void SetCirclePad(std::tuple<s16, s16> circle);
 std::shared_ptr<Keyboard> GetKeyboard();
 
 /**
- * Gets the current touch screen state (touch X/Y coordinates and whether or not it is pressed). Threadsafe.
+ * Gets the current touch screen state (touch X/Y coordinates and whether or not it is pressed).
+ * Threadsafe.
  * @note This should be called by the core emu thread to get a state set by the window thread.
  * @return std::tuple of (x, y, pressed) where `x` and `y` are the touch coordinates and
  *         `pressed` is true if the touch screen is currently being pressed

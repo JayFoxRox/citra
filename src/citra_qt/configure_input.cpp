@@ -8,9 +8,8 @@
 #include "citra_qt/keybinding_names.h"
 #include "common/string_util.h"
 
-#include "input_core/input_core.h"
 #include "input_core/devices/keyboard.h"
-
+#include "input_core/input_core.h"
 
 ConfigureInput::ConfigureInput(QWidget* parent)
     : QWidget(parent), ui(std::make_unique<Ui::ConfigureInput>()) {
@@ -19,30 +18,29 @@ ConfigureInput::ConfigureInput(QWidget* parent)
 
     // Initialize mapping of input enum to UI button.
     qt_buttons = {
-        { std::make_pair(Settings::NativeInput::Values::A, ui->buttonA) },
-        { std::make_pair(Settings::NativeInput::Values::B, ui->buttonB) },
-        { std::make_pair(Settings::NativeInput::Values::X, ui->buttonX) },
-        { std::make_pair(Settings::NativeInput::Values::Y, ui->buttonY) },
-        { std::make_pair(Settings::NativeInput::Values::L, ui->buttonL) },
-        { std::make_pair(Settings::NativeInput::Values::R, ui->buttonR) },
-        { std::make_pair(Settings::NativeInput::Values::ZL, ui->buttonZL) },
-        { std::make_pair(Settings::NativeInput::Values::ZR, ui->buttonZR) },
-        { std::make_pair(Settings::NativeInput::Values::START, ui->buttonStart) },
-        { std::make_pair(Settings::NativeInput::Values::SELECT, ui->buttonSelect) },
-        { std::make_pair(Settings::NativeInput::Values::HOME, ui->buttonHome) },
-        { std::make_pair(Settings::NativeInput::Values::DUP, ui->buttonDpadUp) },
-        { std::make_pair(Settings::NativeInput::Values::DDOWN, ui->buttonDpadDown) },
-        { std::make_pair(Settings::NativeInput::Values::DLEFT, ui->buttonDpadLeft) },
-        { std::make_pair(Settings::NativeInput::Values::DRIGHT, ui->buttonDpadRight) },
-        { std::make_pair(Settings::NativeInput::Values::CUP, ui->buttonCStickUp) },
-        { std::make_pair(Settings::NativeInput::Values::CDOWN, ui->buttonCStickDown) },
-        { std::make_pair(Settings::NativeInput::Values::CLEFT, ui->buttonCStickLeft) },
-        { std::make_pair(Settings::NativeInput::Values::CRIGHT, ui->buttonCStickRight) },
-        { std::make_pair(Settings::NativeInput::Values::CIRCLE_UP, ui->buttonCircleUp) },
-        { std::make_pair(Settings::NativeInput::Values::CIRCLE_DOWN, ui->buttonCircleDown) },
-        { std::make_pair(Settings::NativeInput::Values::CIRCLE_LEFT, ui->buttonCircleLeft) },
-        { std::make_pair(Settings::NativeInput::Values::CIRCLE_RIGHT, ui->buttonCircleRight) }
-    };
+        {std::make_pair(Settings::NativeInput::Values::A, ui->buttonA)},
+        {std::make_pair(Settings::NativeInput::Values::B, ui->buttonB)},
+        {std::make_pair(Settings::NativeInput::Values::X, ui->buttonX)},
+        {std::make_pair(Settings::NativeInput::Values::Y, ui->buttonY)},
+        {std::make_pair(Settings::NativeInput::Values::L, ui->buttonL)},
+        {std::make_pair(Settings::NativeInput::Values::R, ui->buttonR)},
+        {std::make_pair(Settings::NativeInput::Values::ZL, ui->buttonZL)},
+        {std::make_pair(Settings::NativeInput::Values::ZR, ui->buttonZR)},
+        {std::make_pair(Settings::NativeInput::Values::START, ui->buttonStart)},
+        {std::make_pair(Settings::NativeInput::Values::SELECT, ui->buttonSelect)},
+        {std::make_pair(Settings::NativeInput::Values::HOME, ui->buttonHome)},
+        {std::make_pair(Settings::NativeInput::Values::DUP, ui->buttonDpadUp)},
+        {std::make_pair(Settings::NativeInput::Values::DDOWN, ui->buttonDpadDown)},
+        {std::make_pair(Settings::NativeInput::Values::DLEFT, ui->buttonDpadLeft)},
+        {std::make_pair(Settings::NativeInput::Values::DRIGHT, ui->buttonDpadRight)},
+        {std::make_pair(Settings::NativeInput::Values::CUP, ui->buttonCStickUp)},
+        {std::make_pair(Settings::NativeInput::Values::CDOWN, ui->buttonCStickDown)},
+        {std::make_pair(Settings::NativeInput::Values::CLEFT, ui->buttonCStickLeft)},
+        {std::make_pair(Settings::NativeInput::Values::CRIGHT, ui->buttonCStickRight)},
+        {std::make_pair(Settings::NativeInput::Values::CIRCLE_UP, ui->buttonCircleUp)},
+        {std::make_pair(Settings::NativeInput::Values::CIRCLE_DOWN, ui->buttonCircleDown)},
+        {std::make_pair(Settings::NativeInput::Values::CIRCLE_LEFT, ui->buttonCircleLeft)},
+        {std::make_pair(Settings::NativeInput::Values::CIRCLE_RIGHT, ui->buttonCircleRight)}};
 
     // Attach handle click method to each button click.
     for (const auto& entry : qt_buttons) {
@@ -64,9 +62,7 @@ void ConfigureInput::handleClick() {
     grabKeyboard();
     grabMouse();
     changing_button = sender;
-    auto update = []() {
-        QCoreApplication::processEvents();
-    };
+    auto update = []() { QCoreApplication::processEvents(); };
     auto input_device = InputCore::DetectInput(5000, update);
 
     setKey(input_device);
@@ -79,13 +75,15 @@ void ConfigureInput::keyPressEvent(QKeyEvent* event) {
         return;
 
     auto keyboard = InputCore::GetKeyboard();
-    KeyboardKey param = KeyboardKey(event->key(), QKeySequence(event->key()).toString().toStdString());
+    KeyboardKey param =
+        KeyboardKey(event->key(), QKeySequence(event->key()).toString().toStdString());
     keyboard->KeyPressed(param);
 }
 
 void ConfigureInput::applyConfiguration() {
     for (int i = 0; i < Settings::NativeInput::NUM_INPUTS; ++i) {
-        Settings::values.input_mappings[Settings::NativeInput::All[i]] = button_mapping[qt_buttons[Settings::NativeInput::Values(i)]];
+        Settings::values.input_mappings[Settings::NativeInput::All[i]] =
+            button_mapping[qt_buttons[Settings::NativeInput::Values(i)]];
     }
     Settings::values.pad_circle_modifier = button_mapping[ui->buttonCircleMod];
     Settings::Apply();
@@ -155,9 +153,11 @@ void ConfigureInput::removeDuplicates(const Settings::InputDeviceMapping newValu
 
 void ConfigureInput::restoreDefaults() {
     for (int i = 0; i < Settings::NativeInput::NUM_INPUTS; ++i) {
-        Settings::InputDeviceMapping mapping = Settings::InputDeviceMapping(Config::defaults[i].toInt());
+        Settings::InputDeviceMapping mapping =
+            Settings::InputDeviceMapping(Config::defaults[i].toInt());
         button_mapping[qt_buttons[Settings::NativeInput::Values(i)]] = mapping;
-        const QString keyValue = getKeyName(Settings::InputDeviceMapping(Config::defaults[i].toInt()));
+        const QString keyValue =
+            getKeyName(Settings::InputDeviceMapping(Config::defaults[i].toInt()));
         qt_buttons[Settings::NativeInput::Values(i)]->setText(keyValue);
     }
     button_mapping[ui->buttonCircleMod] = Settings::InputDeviceMapping(Qt::Key_F);

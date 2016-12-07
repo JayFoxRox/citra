@@ -7,32 +7,32 @@
 
 #include "input_core/devices/keyboard.h"
 
-Keyboard::Keyboard() {
-}
+Keyboard::Keyboard() {}
 
-Keyboard::~Keyboard() {
-}
+Keyboard::~Keyboard() {}
 
-bool Keyboard::InitDevice(int number, const std::map<std::string, std::vector<Service::HID::PadState>>& keyMap) {
+bool Keyboard::InitDevice(
+    int number, const std::map<std::string, std::vector<Service::HID::PadState>>& keyMap) {
     key_mapping = keyMap;
 
-    //Check if keyboard is mapped for circle up or left. if so, set modifier to -1
+    // Check if keyboard is mapped for circle up or left. if so, set modifier to -1
     for (const auto& entry : key_mapping) {
         if (entry.first == "")
             continue;
         for (const auto& padstate : entry.second) {
-            if (padstate == Service::HID::PAD_CIRCLE_UP || padstate == Service::HID::PAD_CIRCLE_LEFT) {
+            if (padstate == Service::HID::PAD_CIRCLE_UP ||
+                padstate == Service::HID::PAD_CIRCLE_LEFT) {
                 circle_pad_directions[stoi(entry.first)] = -1.0;
-            }
-            else if (padstate == Service::HID::PAD_CIRCLE_DOWN || padstate == Service::HID::PAD_CIRCLE_RIGHT) {
+            } else if (padstate == Service::HID::PAD_CIRCLE_DOWN ||
+                       padstate == Service::HID::PAD_CIRCLE_RIGHT) {
                 circle_pad_directions[stoi(entry.first)] = 1.0;
             }
         }
     }
-    //Check if responsible for circle pad modifier
+    // Check if responsible for circle pad modifier
     auto mapping = Settings::values.pad_circle_modifier;
     if (mapping.device == Settings::Device::Keyboard && mapping.key != "")
-        circle_pad_modifier = KeyboardKey(stoi(mapping.key),"");
+        circle_pad_modifier = KeyboardKey(stoi(mapping.key), "");
     return true;
 }
 
@@ -49,19 +49,20 @@ void Keyboard::ProcessInput() {
         int keycode = std::stoi(entry.first);
         KeyboardKey proxy = KeyboardKey(keycode, "");
 
-        //if key is pressed when prev state is unpressed, or if key pressed and is a circle pad direction
-        if ((keysPressedCopy[proxy] == true && keys_pressed_last[keycode] == false) || (keysPressedCopy[proxy] == true && circle_pad_directions.count(keycode))) {
+        // if key is pressed when prev state is unpressed, or if key pressed and is a circle pad
+        // direction
+        if ((keysPressedCopy[proxy] == true && keys_pressed_last[keycode] == false) ||
+            (keysPressedCopy[proxy] == true && circle_pad_directions.count(keycode))) {
             for (const auto& key : entry.second) {
-                if (circle_pad_directions.count(keycode)) { //If is analog key press
-                    float modifier = (circlePadModPressed) ? Settings::values.pad_circle_modifier_scale : 1;
+                if (circle_pad_directions.count(keycode)) { // If is analog key press
+                    float modifier =
+                        (circlePadModPressed) ? Settings::values.pad_circle_modifier_scale : 1;
                     KeyMap::PressKey(key, circle_pad_directions[keycode] * modifier);
-                }
-                else // Is digital key press
+                } else // Is digital key press
                     KeyMap::PressKey(key, 1.0);
             }
             keys_pressed_last[keycode] = true;
-        }
-        else if (keysPressedCopy[proxy] == false && keys_pressed_last[keycode] == true) {
+        } else if (keysPressedCopy[proxy] == false && keys_pressed_last[keycode] == true) {
             for (const auto& key : entry.second) {
                 KeyMap::ReleaseKey(key);
             }
