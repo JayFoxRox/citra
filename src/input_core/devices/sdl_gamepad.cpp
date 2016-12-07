@@ -102,9 +102,11 @@ std::vector<std::shared_ptr<IDevice>> SDLGamepad::GetAllDevices() {
         LOG_CRITICAL(Input, "SDL_Init(SDL_INIT_GAMECONTROLLER) failed");
         return devices;
     }
+    //FIXME: This appears to be part of some generic SDL init.. move it to a seperate function?!
+    //       (It's done similarily at few lines higher, but slightly different order etc.)
     LoadGameControllerDB();
     SDL_GameControllerEventState(SDL_IGNORE);
-    for (int i = 0; i < 8; i++) {
+    for (int i = 0; i < 8; i++) { // FIXME: Why 8?!
         SDL_GameController* gamecontroller;
         if (SDL_IsGameController(i)) {
             gamecontroller = SDL_GameControllerOpen(i);
@@ -122,6 +124,7 @@ void SDLGamepad::LoadGameControllerDB() {
     if (count == -1) {
         LOG_WARNING(Input, "Could not load GameControllerDB: '%s'", SDL_GetError());
     }
+exit(1); // FIXME: This is never ran for me..
 }
 
 Settings::InputDeviceMapping SDLGamepad::GetInput() {
