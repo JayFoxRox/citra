@@ -10,7 +10,6 @@ set(HEADERS
             input_core.h
             key_map.h
             devices/device.h
-            devices/gamecontrollerdb.h
             devices/keyboard.h
             devices/sdl_gamepad.h
             )

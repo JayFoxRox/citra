@@ -8,10 +8,10 @@
 #include <SDL_gamecontroller.h>
 
 #include "common/assert.h"
+#include "common/file_util.h"
 #include "common/logging/log.h"
 #include "common/string_util.h"
 
-#include "input_core/devices/gamecontrollerdb.h"
 #include "input_core/devices/sdl_gamepad.h"
 
 bool SDLGamepad::SDLInitialized = false;
@@ -117,16 +117,10 @@ std::vector<std::shared_ptr<IDevice>> SDLGamepad::GetAllDevices() {
 }
 
 void SDLGamepad::LoadGameControllerDB() {
-    std::vector<std::string> lines1, lines2, lines3, lines4;
-    Common::SplitString(SDLGameControllerDB::db_file1, '\n', lines1);
-    Common::SplitString(SDLGameControllerDB::db_file2, '\n', lines2);
-    Common::SplitString(SDLGameControllerDB::db_file3, '\n', lines3);
-    Common::SplitString(SDLGameControllerDB::db_file4, '\n', lines4);
-    lines1.insert(lines1.end(), lines2.begin(), lines2.end());
-    lines1.insert(lines1.end(), lines3.begin(), lines3.end());
-    lines1.insert(lines1.end(), lines4.begin(), lines4.end());
-    for (std::string s : lines1) {
-        SDL_GameControllerAddMapping(s.c_str());
+    std::string gamecontrollerdb_path = FileUtil::GetUserPath(D_CONFIG_IDX) + "gamecontrollerdb.txt";
+    int count = SDL_GameControllerAddMappingsFromFile(gamecontrollerdb_path.c_str());
+    if (count == -1) {
+        LOG_WARNING(Input, "Could not load GameControllerDB: '%s'", SDL_GetError());
     }
 }
 
