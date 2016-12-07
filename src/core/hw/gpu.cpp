@@ -551,8 +551,6 @@ static void VBlankCallback(u64 userdata, int cycles_late) {
     GSP_GPU::SignalInterrupt(GSP_GPU::InterruptId::PDC0);
     GSP_GPU::SignalInterrupt(GSP_GPU::InterruptId::PDC1);
 
-    // Check for user input updates
-    Service::HID::Update();
 
     if (!Settings::values.use_vsync && Settings::values.toggle_framelimit) {
         FrameLimiter();
