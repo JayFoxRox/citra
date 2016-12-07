@@ -16,3 +16,6 @@
 [submodule "dynarmic"]
     path = externals/dynarmic
     url = https://github.com/MerryMage/dynarmic.git
+[submodule "externals/gamecontrollerdb"]
+    path = externals/gamecontrollerdb
+    url = https://github.com/gabomdq/SDL_GameControllerDB.git
