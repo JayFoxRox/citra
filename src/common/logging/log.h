@@ -87,7 +87,7 @@ enum class Class : ClassType {
     Loader,            ///< ROM loader
     Input,             ///< Input backend
 
-    Count ///< Total number of logging classes
+    Count              ///< Total number of logging classes
 };
 
 /// Logs a message to the global logger.
