@@ -293,7 +293,7 @@ static void AppendAlphaTestCondition(std::string& out, Regs::CompareFunc func) {
     case CompareFunc::GreaterThanOrEqual: {
         static const char* op[] = {"!=", "==", ">=", ">", "<=", "<"};
         unsigned index = (unsigned)func - (unsigned)CompareFunc::Equal;
-        out += "int(last_tex_env_out.a * 255.0f) " + std::string(op[index]) + " alphatest_ref";
+        out += "int(last_tex_env_out.a * 255.0) " + std::string(op[index]) + " alphatest_ref";
         break;
     }
 
@@ -422,11 +422,11 @@ static void WriteLighting(std::string& out, const PicaShaderConfig& config) {
         if (abs) {
             // LUT index is in the range of (0.0, 1.0)
             index = lighting.light[light_num].two_sided_diffuse ? "abs(" + index + ")"
-                                                                : "max(" + index + ", 0.f)";
+                                                                : "max(" + index + ", 0.0)";
             return "(" + index + ")";
         } else {
             // LUT index is in the range of (-1.0, 1.0)
-            return "(((" + index + " < 0) ? " + index + " + 2.0 : " + index +
+            return "(((" + index + " < 0.0) ? " + index + " + 2.0 : " + index +
                    ") / 2.0)";
         }
 
