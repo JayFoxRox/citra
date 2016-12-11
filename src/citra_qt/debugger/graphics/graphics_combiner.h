@@ -23,4 +23,6 @@ private slots:
 
 private:
     QLabel* tev_stages_label;
+    QLabel* fog_label;
+    QLabel* fog_lut_label;
 };

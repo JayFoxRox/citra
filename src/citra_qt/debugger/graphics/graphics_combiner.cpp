@@ -33,6 +33,21 @@ GraphicsCombinerWidget::GraphicsCombinerWidget(std::shared_ptr<Pica::DebugContex
     }
     main_layout->addWidget(tev_stages_group);
 
+    auto fog_group = new QGroupBox(tr("Fog"));
+    {
+        QVBoxLayout* vbox = new QVBoxLayout;
+
+        fog_label = new QLabel;
+        fog_label->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+        vbox->addWidget(fog_label);
+
+        fog_lut_label = new QLabel;
+        vbox->addWidget(fog_lut_label);
+
+        fog_group->setLayout(vbox);
+    }
+    main_layout->addWidget(fog_group);
+
     main_widget->setLayout(main_layout);
     setWidget(main_widget);
 
@@ -56,6 +71,51 @@ void GraphicsCombinerWidget::Reload() {
                           QString::fromStdString(alpha_str);
     }
     tev_stages_label->setText(tev_stages_str);
+
+    std::string fog_modes[]{"Disabled", "Unknown", "Unknown", "Unknown",
+                            "Unknown",  "Fog",     "Unknown", "Gas"};
+
+    const auto& color = regs.fog_color;
+    fog_label->setText(
+        QString("mode: %0 (%1)\n")
+            .arg(static_cast<int>(regs.fog_mode.Value()))
+            .arg(QString::fromStdString(fog_modes[static_cast<int>(regs.fog_mode.Value())])) +
+        QString("z-flip: %0\n").arg(regs.fog_flip ? "yes" : "no") +
+        QString("color: %0, %1, %2 (0x%3)\n")
+            .arg(color.r)
+            .arg(color.g)
+            .arg(color.b)
+            .arg(color.raw, 8, 16, QLatin1Char('0')) +
+        QString("Lookup Table:"));
+
+    // TODO: Move this into a seperate LUT viewer
+    QPixmap pixmap;
+    constexpr unsigned int SUBPIXELS = 3;
+    QImage fog_lut_image(128 * SUBPIXELS, 256, QImage::Format_ARGB32);
+    for (unsigned int y = 0; y < 256; ++y) {
+        for (unsigned int x = 0; x < (128 * SUBPIXELS); ++x) {
+            auto fog_lut_entry = Pica::g_state.fog.lut[x / SUBPIXELS];
+            int fog_value = fog_lut_entry.value;
+            unsigned int subpixel = x % SUBPIXELS;
+            uint color;
+            if (subpixel == 0) {
+                color = qRgba(255, 0, 0, 255);
+            } else {
+                fog_value += fog_lut_entry.difference.Value() * static_cast<int>(subpixel) /
+                             static_cast<int>(SUBPIXELS);
+                color = qRgba(255, 128, 128, 255);
+            }
+
+            // fog_value is 11 bit, we can only show 8 bit, only keep msb
+            if (y > (fog_value >> (11 - 8))) {
+                fog_lut_image.setPixel(x, y, color);
+            } else {
+                fog_lut_image.setPixel(x, y, qRgba(255, 255, 255, 255));
+            }
+        }
+    }
+    pixmap = QPixmap::fromImage(fog_lut_image);
+    fog_lut_label->setPixmap(pixmap);
 }
 
 void GraphicsCombinerWidget::OnBreakPointHit(Pica::DebugContext::Event event, void* data) {
