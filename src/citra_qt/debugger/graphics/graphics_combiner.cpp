@@ -37,6 +37,18 @@ GraphicsCombinerWidget::GraphicsCombinerWidget(std::shared_ptr<Pica::DebugContex
     }
     main_layout->addWidget(depth_group);
 
+    auto blend_group = new QGroupBox(tr("Blending"));
+    {
+        QVBoxLayout* vbox = new QVBoxLayout;
+
+        blend_label = new QLabel;
+        blend_label->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+        vbox->addWidget(blend_label);
+
+        blend_group->setLayout(vbox);
+    }
+    main_layout->addWidget(blend_group);
+
     auto tev_stages_group = new QGroupBox(tr("Tev stages"));
     {
         QVBoxLayout* vbox = new QVBoxLayout;
@@ -84,6 +96,77 @@ void GraphicsCombinerWidget::Reload() {
             .arg(Pica::float24::FromRaw(regs.viewport_depth_near_plane).ToFloat32(), 0, 'e', 3) +
         QString("Depth scale: %0")
             .arg(Pica::float24::FromRaw(regs.viewport_depth_range).ToFloat32(), 0, 'e', 3));
+
+    auto getBlendEquation = []() -> std::string {
+        /*
+                Add = 0,
+                Subtract = 1,
+                %1 - %0
+                Min(%0, %1)
+                Max(%0, %1)
+        */
+        return "";
+    };
+
+    auto getBlendFactor = []() -> std::string {
+        /*
+                Zero = 0,
+                One = 1,
+                SourceColor = 2,
+                OneMinusSourceColor = 3,
+                DestColor = 4,
+                OneMinusDestColor = 5,
+                SourceAlpha = 6,
+                OneMinusSourceAlpha = 7,
+                DestAlpha = 8,
+                OneMinusDestAlpha = 9,
+                ConstantColor = 10,
+                OneMinusConstantColor = 11,
+                ConstantAlpha = 12,
+                OneMinusConstantAlpha = 13,
+                SourceAlphaSaturate = 14,
+        */
+        return "";
+    };
+
+    if (regs.output_merger.alphablend_enable) {
+        blend_label->setText(
+            QString("Mode: Alpha blending\n") +
+            QString("Blend equation: %0, %1\n")
+                .arg(static_cast<int>(regs.output_merger.alpha_blending.blend_equation_rgb.Value()))
+                .arg(static_cast<int>(regs.output_merger.alpha_blending.blend_equation_a.Value())) +
+            QString("Blend source factor: %0, %1\n")
+                .arg(static_cast<int>(regs.output_merger.alpha_blending.factor_source_rgb.Value()))
+                .arg(static_cast<int>(regs.output_merger.alpha_blending.factor_source_a.Value())) +
+            QString("Blend destination factor: %0, %1\n")
+                .arg(static_cast<int>(regs.output_merger.alpha_blending.factor_dest_rgb.Value()))
+                .arg(static_cast<int>(regs.output_merger.alpha_blending.factor_dest_a.Value())) +
+            QString("Alpha testing: %0, func: %1, ref: %2")
+                .arg(static_cast<int>(regs.output_merger.alpha_test.enable))
+                .arg(static_cast<int>(regs.output_merger.alpha_test.func.Value()))
+                .arg(static_cast<int>(regs.output_merger.alpha_test.ref)));
+
+        // blend_const
+        /*
+                union {
+                    BitField<0, 8, BlendEquation> ;
+                    BitField<8, 8, BlendEquation> blend_equation_a;
+
+                    BitField<16, 4, BlendFactor> factor_source_rgb;
+                    BitField<20, 4, BlendFactor> factor_dest_rgb;
+
+                    BitField<24, 4, BlendFactor> factor_source_a;
+                    BitField<28, 4, BlendFactor> factor_dest_a;
+                } blend_const;
+                union {
+                    BitField<0, 1, u32> enable;
+                    BitField<4, 3, CompareFunc> func;
+                    BitField<8, 8, u32> ref;
+                } alpha_test;
+        */
+    } else {
+        blend_label->setText(QString("Mode: Logic blending\n"));
+    }
 
     auto tev_stages = regs.GetTevStages();
     auto tev_stages_str = QString();

@@ -23,6 +23,7 @@ private slots:
 
 private:
     QLabel* depth_label;
+    QLabel* blend_label;
     QLabel* tev_stages_label;
     QLabel* fog_label;
     QLabel* fog_lut_label;
