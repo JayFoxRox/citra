@@ -15,6 +15,11 @@ ConfigureGeneral::ConfigureGeneral(QWidget* parent)
     this->setConfiguration();
 
     ui->toggle_cpu_jit->setEnabled(!System::IsPoweredOn());
+#ifndef ARCHITECTURE_x86_64
+    ui->toggle_cpu_jit->hide();
+    // As the CPU JIT option is the only Performance option, we can hide the entire box
+    ui->performance_box->hide();
+#endif // ARCHITECTURE_x86_64
 }
 
 ConfigureGeneral::~ConfigureGeneral() {}

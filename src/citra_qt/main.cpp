@@ -215,6 +215,14 @@ GMainWindow::GMainWindow() : config(new Config()), emu_thread(nullptr) {
         Common::StringFromFormat("Citra | %s-%s", Common::g_scm_branch, Common::g_scm_desc);
     setWindowTitle(window_title.c_str());
 
+#ifndef ARCHITECTURE_x86_64
+    // Non-x64 does not have any form of JIT yet.
+    QMessageBox::warning(this, tr("Unsupported platform!"),
+                         tr("Citra does not support the platform you are running on.\n\n"
+                            "Some optimizations will not be available and won't appear in the Configuration.\n"
+                            "Expect poor performance. Do not ask for support!"));
+#endif
+
     show();
 
     game_list->PopulateAsync(UISettings::values.gamedir, UISettings::values.gamedir_deepscan);
