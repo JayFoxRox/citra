@@ -14,15 +14,17 @@ set(__windows_copy_files YES)
 # Any number of files to copy from SOURCE_DIR to DEST_DIR can be specified after DEST_DIR.
 # This copying happens post-build.
 function(windows_copy_files TARGET SOURCE_DIR DEST_DIR)
-    # windows commandline expects the / to be \ so switch them
-    string(REPLACE "/" "\\\\" SOURCE_DIR ${SOURCE_DIR})
-    string(REPLACE "/" "\\\\" DEST_DIR ${DEST_DIR})
-
-    # /NJH /NJS /NDL /NFL /NC /NS /NP - Silence any output
-    # cmake adds an extra check for command success which doesn't work too well with robocopy
-    # so trick it into thinking the command was successful with the || cmd /c "exit /b 0"
     add_custom_command(TARGET ${TARGET} POST_BUILD
-        COMMAND if not exist ${DEST_DIR} mkdir ${DEST_DIR} 2> nul
-        COMMAND robocopy ${SOURCE_DIR} ${DEST_DIR} ${ARGN} /NJH /NJS /NDL /NFL /NC /NS /NP || cmd /c "exit /b 0"
-    )
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${DEST_DIR})
+    foreach(pattern ${ARGN})
+        file(GLOB files "${SOURCE_DIR}/${pattern}" FOLLOW_SYMLINKS)
+        add_custom_command(TARGET ${TARGET} POST_BUILD
+            COMMAND echo "Globbed ${SOURCE_DIR}/${pattern} to ${files}")
+        if (files)
+            add_custom_command(TARGET ${TARGET} POST_BUILD
+                COMMAND echo "Moving ${files} to ${DEST_DIR}")
+            add_custom_command(TARGET ${TARGET} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy ${files} ${DEST_DIR})
+        endif()
+    endforeach(pattern)
 endfunction()
