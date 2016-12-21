@@ -84,7 +84,24 @@ set(UIS
             main.ui
             )
 
-create_directory_groups(${SRCS} ${HEADERS} ${UIS})
+set(LANGS
+            translation/language_de.ts
+            translation/language_en.ts
+)
+
+find_package(Qt5LinguistTools REQUIRED)
+
+# Some packages might be in the system include path, qt5_create_translation is poorly written
+# and will explicitly list all INCLUDE_DIRECTORIES for translation search which would take hours.
+# To avoid this we first clear the list, and then restore it afterwards..
+get_directory_property(_inc_DIRS INCLUDE_DIRECTORIES)
+set_directory_properties(PROPERTIES INCLUDE_DIRECTORIES "")
+qt5_create_translation(TRANSLATIONS ${SRCS} ${HEADERS} ${UIS} ${LANGS})
+set_directory_properties(PROPERTIES INCLUDE_DIRECTORIES "${_inc_DIRS}")
+
+#qt5_add_translation(TRANSLATIONS ${LANGS})
+
+create_directory_groups(${SRCS} ${HEADERS} ${UIS} ${LANGS})
 
 if (Qt5_FOUND)
     qt5_wrap_ui(UI_HDRS ${UIS})
@@ -95,10 +112,10 @@ endif()
 if (APPLE)
     set(MACOSX_ICON "../../dist/citra.icns")
     set_source_files_properties(${MACOSX_ICON} PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
-    add_executable(citra-qt MACOSX_BUNDLE ${SRCS} ${HEADERS} ${UI_HDRS} ${MACOSX_ICON})
+    add_executable(citra-qt MACOSX_BUNDLE ${SRCS} ${HEADERS} ${UI_HDRS} ${TRANSLATIONS} ${MACOSX_ICON})
     set_target_properties(citra-qt PROPERTIES MACOSX_BUNDLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/Info.plist)
 else()
-    add_executable(citra-qt ${SRCS} ${HEADERS} ${UI_HDRS})
+    add_executable(citra-qt ${SRCS} ${HEADERS} ${UI_HDRS} ${TRANSLATIONS})
 endif()
 target_link_libraries(citra-qt core video_core audio_core common qhexedit)
 target_link_libraries(citra-qt ${OPENGL_gl_LIBRARY} ${CITRA_QT_LIBS})
