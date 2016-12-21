@@ -6,7 +6,6 @@
 
 #include <array>
 #include <cstddef>
-#include <memory>
 #include <type_traits>
 #include <nihstro/shader_bytecode.h>
 #include "common/assert.h"
@@ -15,7 +14,7 @@
 #include "common/vector_math.h"
 #include "video_core/pica.h"
 #include "video_core/pica_types.h"
-#include "video_core/shader/debug_data.h"
+#include "video_core/primitive_assembly.h"
 
 using nihstro::RegisterType;
 using nihstro::SourceRegister;
@@ -103,6 +102,18 @@ struct UnitState {
     } registers;
     static_assert(std::is_pod<Registers>::value, "Structure is not POD");
 
+    OutputRegisters emit_buffers[3]; // TODO: 3dbrew suggests this only stores the
+                                     // first 7 output registers
+
+    union EmitParameters {
+        u32 raw;
+        BitField<22, 1, u32> winding;
+        BitField<23, 1, u32> primitive_emit;
+        BitField<24, 2, u32> vertex_id;
+    } emit_params;
+
+    PrimitiveAssembler<OutputVertex>::TriangleHandler emit_triangle_callback;
+
     OutputRegisters output_registers;
 
     bool conditional_code[2];
@@ -142,13 +153,21 @@ struct UnitState {
             return 0;
         }
     }
+
+    static size_t EmitParamsOffset() {
+        return offsetof(UnitState, emit_params.raw);
+    }
+
+    /**
+     * Loads the unit state with an input vertex.
+     *
+     * @param input Input vertex into the shader
+     * @param num_attributes The number of vertex shader attributes to load
+     */
+    void LoadInputVertex(const InputVertex& input, int num_attributes);
 };
 
-/// Clears the shader cache
-void ClearCache();
-
 struct ShaderSetup {
-
     struct {
         // The float uniforms are accessed by the shader JIT using SSE instructions, and are
         // therefore required to be 16-byte aligned.
@@ -170,34 +189,47 @@ struct ShaderSetup {
         return offsetof(ShaderSetup, uniforms.i) + index * sizeof(Math::Vec4<u8>);
     }
 
+    int float_regs_counter = 0;
+    u32 uniform_write_buffer[4];
+
     std::array<u32, 1024> program_code;
     std::array<u32, 1024> swizzle_data;
+};
+
+class ShaderEngine {
+public:
+    virtual ~ShaderEngine() = default;
 
     /**
      * Performs any shader unit setup that only needs to happen once per shader (as opposed to once
      * per vertex, which would happen within the `Run` function).
      */
-    void Setup();
+    virtual void SetupBatch(const ShaderSetup* setup) = 0;
 
     /**
      * Runs the currently setup shader
      * @param state Shader unit state, must be setup per shader and per shader unit
-     * @param input Input vertex into the shader
-     * @param num_attributes The number of vertex shader attributes
      */
-    void Run(UnitState& state, const InputVertex& input, int num_attributes);
-
-    /**
-     * Produce debug information based on the given shader and input vertex
-     * @param input Input vertex into the shader
-     * @param num_attributes The number of vertex shader attributes
-     * @param config Configuration object for the shader pipeline
-     * @param setup Setup object for the shader pipeline
-     * @return Debug information for this shader with regards to the given vertex
-     */
-    DebugData<true> ProduceDebugInfo(const InputVertex& input, int num_attributes,
-                                     const Regs::ShaderConfig& config, const ShaderSetup& setup);
+    virtual void Run(UnitState& state, unsigned int entry_point) const = 0;
 };
+
+// TODO(yuriks): Remove and make it non-global state somewhere
+ShaderEngine* GetEngine();
+void Shutdown();
+
+bool SharedGS();
+bool UseGS();
+UnitState& GetShaderUnit(bool gs);
+void WriteUniformBoolReg(bool gs, u32 value);
+void WriteUniformIntReg(bool gs, unsigned index, const Math::Vec4<u8>& values);
+void WriteUniformFloatSetupReg(bool gs, u32 value);
+void WriteUniformFloatReg(bool gs, u32 value);
+void WriteProgramCodeOffset(bool gs, u32 value);
+void WriteProgramCode(bool gs, u32 value);
+void WriteSwizzlePatternsOffset(bool gs, u32 value);
+void WriteSwizzlePatterns(bool gs, u32 value);
+
+void HandleEMIT(UnitState& state);
 
 } // namespace Shader
 

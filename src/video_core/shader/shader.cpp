@@ -2,14 +2,8 @@
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
 
-#include <atomic>
 #include <cmath>
 #include <cstring>
-#include <unordered_map>
-#include <utility>
-#include <boost/range/algorithm/fill.hpp>
-#include "common/bit_field.h"
-#include "common/hash.h"
 #include "common/logging/log.h"
 #include "common/microprofile.h"
 #include "video_core/pica.h"
@@ -76,84 +70,245 @@ OutputVertex OutputRegisters::ToVertex(const Regs::ShaderConfig& config) const {
     return ret;
 }
 
-#ifdef ARCHITECTURE_x86_64
-static std::unordered_map<u64, std::unique_ptr<JitShader>> shader_map;
-static const JitShader* jit_shader;
-#endif // ARCHITECTURE_x86_64
+void UnitState::LoadInputVertex(const InputVertex& input, int num_attributes) {
+    // Setup input register table
+    const auto& attribute_register_map = g_state.regs.vs.input_register_map;
 
-void ClearCache() {
-#ifdef ARCHITECTURE_x86_64
-    shader_map.clear();
-#endif // ARCHITECTURE_x86_64
-}
+    for (unsigned i = 0; i < num_attributes; i++)
+        registers.input[attribute_register_map.GetRegisterForAttribute(i)] = input.attr[i];
 
-void ShaderSetup::Setup() {
-#ifdef ARCHITECTURE_x86_64
-    if (VideoCore::g_shader_jit_enabled) {
-        u64 cache_key =
-            Common::ComputeHash64(&g_state.vs.program_code, sizeof(g_state.vs.program_code)) ^
-            Common::ComputeHash64(&g_state.vs.swizzle_data, sizeof(g_state.vs.swizzle_data));
-
-        auto iter = shader_map.find(cache_key);
-        if (iter != shader_map.end()) {
-            jit_shader = iter->second.get();
-        } else {
-            auto shader = std::make_unique<JitShader>();
-            shader->Compile();
-            jit_shader = shader.get();
-            shader_map[cache_key] = std::move(shader);
-        }
-    }
-#endif // ARCHITECTURE_x86_64
+    conditional_code[0] = false;
+    conditional_code[1] = false;
 }
 
 MICROPROFILE_DEFINE(GPU_Shader, "GPU", "Shader", MP_RGB(50, 50, 240));
 
-void ShaderSetup::Run(UnitState& state, const InputVertex& input, int num_attributes) {
-    auto& config = g_state.regs.vs;
-    auto& setup = g_state.vs;
-
-    MICROPROFILE_SCOPE(GPU_Shader);
-
-    // Setup input register table
-    const auto& attribute_register_map = config.input_register_map;
-
-    for (unsigned i = 0; i < num_attributes; i++)
-        state.registers.input[attribute_register_map.GetRegisterForAttribute(i)] = input.attr[i];
-
-    state.conditional_code[0] = false;
-    state.conditional_code[1] = false;
-
 #ifdef ARCHITECTURE_x86_64
+static std::unique_ptr<JitX64Engine> jit_engine;
+#endif // ARCHITECTURE_x86_64
+static InterpreterEngine interpreter_engine;
+
+ShaderEngine* GetEngine() {
+#ifdef ARCHITECTURE_x86_64
+    // TODO(yuriks): Re-initialize on each change rather than being persistent
     if (VideoCore::g_shader_jit_enabled) {
-        jit_shader->Run(setup, state, config.main_offset);
-    } else {
-        DebugData<false> dummy_debug_data;
-        RunInterpreter(setup, state, dummy_debug_data, config.main_offset);
+        if (jit_engine == nullptr) {
+            jit_engine = std::make_unique<JitX64Engine>();
+        }
+        return jit_engine.get();
     }
-#else
-    DebugData<false> dummy_debug_data;
-    RunInterpreter(setup, state, dummy_debug_data, config.main_offset);
+#endif // ARCHITECTURE_x86_64
+
+    return &interpreter_engine;
+}
+
+void Shutdown() {
+#ifdef ARCHITECTURE_x86_64
+    jit_engine = nullptr;
 #endif // ARCHITECTURE_x86_64
 }
 
-DebugData<true> ShaderSetup::ProduceDebugInfo(const InputVertex& input, int num_attributes,
-                                              const Regs::ShaderConfig& config,
-                                              const ShaderSetup& setup) {
-    UnitState state;
-    DebugData<true> debug_data;
+bool SharedGS() {
+    return g_state.regs.vs_com_mode == Pica::Regs::VSComMode::Shared;
+}
 
-    // Setup input register table
-    boost::fill(state.registers.input, Math::Vec4<float24>::AssignToAll(float24::Zero()));
-    const auto& attribute_register_map = config.input_register_map;
-    for (unsigned i = 0; i < num_attributes; i++)
-        state.registers.input[attribute_register_map.GetRegisterForAttribute(i)] = input.attr[i];
+bool UseGS() {
+    // TODO(ds84182): This would be more accurate if it looked at induvidual
+    // shader units for the geoshader bit
+    // gs_regs.input_buffer_config.use_geometry_shader == 0x08
+    ASSERT((g_state.regs.using_geometry_shader == 0) || (g_state.regs.using_geometry_shader == 2));
+    return g_state.regs.using_geometry_shader == 2;
+}
 
-    state.conditional_code[0] = false;
-    state.conditional_code[1] = false;
+UnitState& GetShaderUnit(bool gs) {
 
-    RunInterpreter(setup, state, debug_data, config.main_offset);
-    return debug_data;
+    // GS are always run on shader unit 3
+    if (gs) {
+        return g_state.shader_units[3];
+    }
+
+    // The worst scheduler you'll ever see!
+    // TODO: How does PICA shader scheduling work?
+    static unsigned shader_unit_scheduler = 0;
+    shader_unit_scheduler++;
+    shader_unit_scheduler %= 3; // TODO: When does it also allow use of unit 3?!
+    return g_state.shader_units[shader_unit_scheduler];
+}
+
+void WriteUniformBoolReg(bool gs, u32 value) {
+    auto& setup = gs ? g_state.gs : g_state.vs;
+
+    ASSERT(setup.uniforms.b.size() == 16);
+    for (unsigned i = 0; i < 16; ++i)
+        setup.uniforms.b[i] = (value & (1 << i)) != 0;
+
+    // Copy for GS in shared mode
+    if (!gs && SharedGS()) {
+        WriteUniformBoolReg(true, value);
+    }
+}
+
+void WriteUniformIntReg(bool gs, unsigned index, const Math::Vec4<u8>& values) {
+    const char* shader_type = gs ? "GS" : "VS";
+    auto& setup = gs ? g_state.gs : g_state.vs;
+
+    ASSERT(index < setup.uniforms.i.size());
+    setup.uniforms.i[index] = values;
+    LOG_TRACE(HW_GPU, "Set %s integer uniform %d to %02x %02x %02x %02x", shader_type, index,
+              values.x.Value(), values.y.Value(), values.z.Value(), values.w.Value());
+
+    // Copy for GS in shared mode
+    if (!gs && SharedGS()) {
+        WriteUniformIntReg(true, index, values);
+    }
+}
+
+void WriteUniformFloatSetupReg(bool gs, u32 value) {
+    auto& config = gs ? g_state.regs.gs : g_state.regs.vs;
+
+    config.uniform_setup.setup = value;
+
+    // Copy for GS in shared mode
+    if (!gs && SharedGS()) {
+        WriteUniformFloatSetupReg(true, value);
+    }
+}
+
+void WriteUniformFloatReg(bool gs, u32 value) {
+    const char* shader_type = gs ? "GS" : "VS";
+    auto& config = gs ? g_state.regs.gs : g_state.regs.vs;
+    auto& setup = gs ? g_state.gs : g_state.vs;
+
+    auto& uniform_setup = config.uniform_setup;
+    auto& uniform_write_buffer = setup.uniform_write_buffer;
+    auto& float_regs_counter = setup.float_regs_counter;
+
+    // TODO: Does actual hardware indeed keep an intermediate buffer or does
+    //       it directly write the values?
+    uniform_write_buffer[float_regs_counter++] = value;
+
+    // Uniforms are written in a packed format such that four float24 values are
+    // encoded in
+    // three 32-bit numbers. We write to internal memory once a full such vector
+    // is
+    // written.
+    if ((float_regs_counter >= 4 && uniform_setup.IsFloat32()) ||
+        (float_regs_counter >= 3 && !uniform_setup.IsFloat32())) {
+        float_regs_counter = 0;
+
+        auto& uniform = setup.uniforms.f[uniform_setup.index];
+
+        if (uniform_setup.index >= 96) {
+            LOG_ERROR(HW_GPU, "Invalid %s float uniform index %d", shader_type,
+                      (int)uniform_setup.index);
+        } else {
+
+            // NOTE: The destination component order indeed is "backwards"
+            if (uniform_setup.IsFloat32()) {
+                for (auto i : {0, 1, 2, 3})
+                    uniform[3 - i] = float24::FromFloat32(*(float*)(&uniform_write_buffer[i]));
+            } else {
+                // TODO: Untested
+                uniform.w = float24::FromRaw(uniform_write_buffer[0] >> 8);
+                uniform.z = float24::FromRaw(((uniform_write_buffer[0] & 0xFF) << 16) |
+                                             ((uniform_write_buffer[1] >> 16) & 0xFFFF));
+                uniform.y = float24::FromRaw(((uniform_write_buffer[1] & 0xFFFF) << 8) |
+                                             ((uniform_write_buffer[2] >> 24) & 0xFF));
+                uniform.x = float24::FromRaw(uniform_write_buffer[2] & 0xFFFFFF);
+            }
+
+            LOG_TRACE(HW_GPU, "Set %s float uniform %x to (%f %f %f %f)", shader_type,
+                      (int)uniform_setup.index, uniform.x.ToFloat32(), uniform.y.ToFloat32(),
+                      uniform.z.ToFloat32(), uniform.w.ToFloat32());
+
+            // TODO: Verify that this actually modifies the register!
+            uniform_setup.index.Assign(uniform_setup.index + 1);
+        }
+    }
+
+    // Copy for GS in shared mode
+    if (!gs && SharedGS()) {
+        WriteUniformFloatReg(true, value);
+    }
+}
+
+void WriteProgramCodeOffset(bool gs, u32 value) {
+    auto& config = gs ? g_state.regs.gs : g_state.regs.vs;
+    config.program.offset = value;
+
+    // Copy for GS in shared mode
+    if (!gs && SharedGS()) {
+        WriteProgramCodeOffset(true, value);
+    }
+}
+
+void WriteProgramCode(bool gs, u32 value) {
+    const char* shader_type = gs ? "GS" : "VS";
+    auto& config = gs ? g_state.regs.gs : g_state.regs.vs;
+    auto& setup = gs ? g_state.gs : g_state.vs;
+
+    if (config.program.offset >= setup.program_code.size()) {
+        LOG_ERROR(HW_GPU, "Invalid %s program offset %d", shader_type, (int)config.program.offset);
+    } else {
+        setup.program_code[config.program.offset] = value;
+        config.program.offset++;
+    }
+
+    // Copy for GS in shared mode
+    if (!gs && SharedGS()) {
+        WriteProgramCode(true, value);
+    }
+}
+
+void WriteSwizzlePatternsOffset(bool gs, u32 value) {
+    auto& config = gs ? g_state.regs.gs : g_state.regs.vs;
+    config.swizzle_patterns.offset = value;
+
+    // Copy for GS in shared mode
+    if (!gs && SharedGS()) {
+        WriteSwizzlePatternsOffset(true, value);
+    }
+}
+
+void WriteSwizzlePatterns(bool gs, u32 value) {
+    const char* shader_type = gs ? "GS" : "VS";
+    auto& config = gs ? g_state.regs.gs : g_state.regs.vs;
+    auto& setup = gs ? g_state.gs : g_state.vs;
+
+    if (config.swizzle_patterns.offset >= setup.swizzle_data.size()) {
+        LOG_ERROR(HW_GPU, "Invalid %s swizzle pattern offset %d", shader_type,
+                  (int)config.swizzle_patterns.offset);
+    } else {
+        setup.swizzle_data[config.swizzle_patterns.offset] = value;
+        config.swizzle_patterns.offset++;
+    }
+
+    // Copy for GS in shared mode
+    if (!gs && SharedGS()) {
+        WriteSwizzlePatterns(true, value);
+    }
+}
+
+void HandleEMIT(UnitState& state) {
+    auto& config = g_state.regs.gs;
+    auto& emit_params = state.emit_params;
+    auto& emit_buffers = state.emit_buffers;
+
+    ASSERT(emit_params.vertex_id < 3);
+
+    emit_buffers[emit_params.vertex_id] = state.output_registers;
+
+    if (emit_params.primitive_emit) {
+        ASSERT_MSG(state.emit_triangle_callback, "EMIT invoked but no handler set!");
+        OutputVertex v0 = emit_buffers[0].ToVertex(config);
+        OutputVertex v1 = emit_buffers[1].ToVertex(config);
+        OutputVertex v2 = emit_buffers[2].ToVertex(config);
+        if (emit_params.winding) {
+            state.emit_triangle_callback(v2, v1, v0);
+        } else {
+            state.emit_triangle_callback(v0, v1, v2);
+        }
+    }
 }
 
 } // namespace Shader
