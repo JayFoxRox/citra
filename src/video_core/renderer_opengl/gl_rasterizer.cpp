@@ -130,8 +130,8 @@ RasterizerOpenGL::RasterizerOpenGL() : shader_dirty(true) {
     SyncBlendFuncs();
     SyncBlendColor();
     SyncLogicOp();
-    SyncStencilTest();
     SyncDepthTest();
+    SyncStencilTest();
     SyncColorWriteMask();
     SyncStencilWriteMask();
     SyncDepthWriteMask();
@@ -380,6 +380,7 @@ void RasterizerOpenGL::NotifyPicaRegisterChanged(u32 id) {
     // (Pica depth test function register also contains a depth and color write mask)
     case PICA_REG_INDEX(output_merger.depth_test_enable):
         SyncDepthTest();
+        SyncStencilTest();
         SyncDepthWriteMask();
         SyncColorWriteMask();
         break;
@@ -395,6 +396,18 @@ void RasterizerOpenGL::NotifyPicaRegisterChanged(u32 id) {
     // (This is a dedicated color write-enable register)
     case PICA_REG_INDEX(framebuffer.allow_color_write):
         SyncColorWriteMask();
+        break;
+
+    // Color read mask
+    case PICA_REG_INDEX(framebuffer.allow_color_read):
+        SyncLogicOp();
+        SyncBlendFuncs();
+        break;
+
+    // Stencil and depth read mask
+    case PICA_REG_INDEX(framebuffer.allow_depth_stencil_read):
+        SyncDepthTest();
+        SyncStencilTest();
         break;
 
     // Scissor test
@@ -1156,16 +1169,41 @@ void RasterizerOpenGL::SyncBlendEnabled() {
 
 void RasterizerOpenGL::SyncBlendFuncs() {
     const auto& regs = Pica::g_state.regs;
+
+    // This function pretends the destination read was 0x00 if the reads are not allowed
+    auto BlendAllowedFunc = [&](bool dest, Pica::Regs::BlendFactor factor) -> GLenum {
+
+        if (regs.framebuffer.allow_color_read == 0x0) {
+
+            // Destination would only read zero, so we can multiply by ZERO in blend func
+            if (dest)
+                return GL_ZERO;
+
+            if (factor == Pica::Regs::BlendFactor::DestColor ||
+                factor == Pica::Regs::BlendFactor::DestAlpha)
+                return GL_ZERO;
+
+            if (factor == Pica::Regs::BlendFactor::OneMinusDestColor ||
+                factor == Pica::Regs::BlendFactor::OneMinusDestAlpha)
+                return GL_ONE;
+
+        }
+
+        return PicaToGL::BlendFunc(factor);
+    };
+
     state.blend.rgb_equation =
         PicaToGL::BlendEquation(regs.output_merger.alpha_blending.blend_equation_rgb);
     state.blend.a_equation =
         PicaToGL::BlendEquation(regs.output_merger.alpha_blending.blend_equation_a);
     state.blend.src_rgb_func =
-        PicaToGL::BlendFunc(regs.output_merger.alpha_blending.factor_source_rgb);
+        BlendAllowedFunc(false, regs.output_merger.alpha_blending.factor_source_rgb);
     state.blend.dst_rgb_func =
-        PicaToGL::BlendFunc(regs.output_merger.alpha_blending.factor_dest_rgb);
-    state.blend.src_a_func = PicaToGL::BlendFunc(regs.output_merger.alpha_blending.factor_source_a);
-    state.blend.dst_a_func = PicaToGL::BlendFunc(regs.output_merger.alpha_blending.factor_dest_a);
+        BlendAllowedFunc(true, regs.output_merger.alpha_blending.factor_dest_rgb);
+    state.blend.src_a_func =
+        BlendAllowedFunc(false, regs.output_merger.alpha_blending.factor_source_a);
+    state.blend.dst_a_func =
+        BlendAllowedFunc(true, regs.output_merger.alpha_blending.factor_dest_a);
 }
 
 void RasterizerOpenGL::SyncBlendColor() {
@@ -1208,7 +1246,61 @@ void RasterizerOpenGL::SyncAlphaTest() {
 }
 
 void RasterizerOpenGL::SyncLogicOp() {
-    state.logic_op = PicaToGL::LogicOp(Pica::g_state.regs.output_merger.logic_op);
+    const auto& regs = Pica::g_state.regs;
+
+    if (regs.framebuffer.allow_color_read == 0x0) {
+
+        // Pretend that the destination reads always return 0
+        switch (regs.output_merger.logic_op) {
+
+        // Always 0
+        case Pica::Regs::LogicOp::Clear:
+        case Pica::Regs::LogicOp::And:
+        case Pica::Regs::LogicOp::AndInverted:
+            state.logic_op = GL_CLEAR;
+            break;
+
+        // Always s
+        case Pica::Regs::LogicOp::AndReverse:
+        case Pica::Regs::LogicOp::Copy:
+        case Pica::Regs::LogicOp::Or:
+        case Pica::Regs::LogicOp::Xor:
+            state.logic_op = GL_COPY;
+            break;
+
+        // Always 1
+        case Pica::Regs::LogicOp::Set:
+        case Pica::Regs::LogicOp::Invert:
+        case Pica::Regs::LogicOp::Nand:
+        case Pica::Regs::LogicOp::OrReverse:
+            state.logic_op = GL_SET;
+            break;
+
+        // Always ~s
+        case Pica::Regs::LogicOp::CopyInverted:
+        case Pica::Regs::LogicOp::Nor:
+        case Pica::Regs::LogicOp::Equiv:
+        case Pica::Regs::LogicOp::OrInverted:
+            state.logic_op = GL_COPY_INVERTED;
+            break;
+
+        // FIXME: Decide for one of those:
+        //a. NoOp means reading zero, writing back zero
+        //b. NoOp means not touching the framebuffer
+        case Pica::Regs::LogicOp::NoOp:
+            state.logic_op = GL_CLEAR; // a
+            state.logic_op = GL_NOOP; // b
+            break;
+
+        default:
+            LOG_CRITICAL(Render_OpenGL, "Unknown logic op %d", regs.output_merger.logic_op);
+            UNREACHABLE();
+            break;
+        }
+
+    } else {
+        state.logic_op = PicaToGL::LogicOp(regs.output_merger.logic_op);
+    }
 }
 
 void RasterizerOpenGL::SyncColorWriteMask() {
@@ -1239,28 +1331,150 @@ void RasterizerOpenGL::SyncDepthWriteMask() {
             : GL_FALSE;
 }
 
+// Depends on the correct GL DepthTest state!
 void RasterizerOpenGL::SyncStencilTest() {
     const auto& regs = Pica::g_state.regs;
-    state.stencil.test_enabled = regs.output_merger.stencil_test.enable &&
+    const auto& stencil_test = regs.output_merger.stencil_test;
+
+    state.stencil.test_enabled = stencil_test.enable &&
                                  regs.framebuffer.depth_format == Pica::Regs::DepthFormat::D24S8;
-    state.stencil.test_func = PicaToGL::CompareFunc(regs.output_merger.stencil_test.func);
-    state.stencil.test_ref = regs.output_merger.stencil_test.reference_value;
-    state.stencil.test_mask = regs.output_merger.stencil_test.input_mask;
-    state.stencil.action_stencil_fail =
-        PicaToGL::StencilOp(regs.output_merger.stencil_test.action_stencil_fail);
-    state.stencil.action_depth_fail =
-        PicaToGL::StencilOp(regs.output_merger.stencil_test.action_depth_fail);
-    state.stencil.action_depth_pass =
-        PicaToGL::StencilOp(regs.output_merger.stencil_test.action_depth_pass);
+
+    if (state.stencil.test_enabled) {
+        if (!regs.framebuffer.allow_depth_stencil_read) {
+
+            // All stencil reads must be emulated as 0x00
+
+            u8 masked_ref = (stencil_test.reference_value & stencil_test.input_mask);
+
+            if (masked_ref == 0x00) {
+                // x = 0x00
+                state.stencil.test_func = PicaToGL::CompareXToXFunc(stencil_test.func);
+            } else {
+                // x = masked stencil ref
+                state.stencil.test_func = PicaToGL::CompareXToZeroFunc(stencil_test.func);
+            }
+
+            //FIXME: check if writeback is possible, otherwise this is useless
+            if (true) {
+
+                // We need a stencil read if we can't decide the stencil test staticly
+                bool needs_stencil_read = (state.stencil.test_func != GL_NEVER &&
+                                           state.stencil.test_func != GL_ALWAYS);
+
+                //TODO: In rare cases the stencil test doesn't depend on the masked ref ('Never'
+                //      and 'Always') and only 1 specific value for the stencil op writes is
+                //      necessary. In those cases one could set the ref and ref-mask to the
+                //      required value.
+                //FIXME: Return value instead..?
+                auto StencilAllowedOp = [&](Pica::Regs::StencilAction action) -> GLenum {
+
+                    switch (action) {
+
+                    // FIXME: Decide for one of those:
+                    //a. Keeping the framebuffer value means reading zero, writing back zero
+                    //b. Keeping the framebuffer value means not touching it
+                    case Pica::Regs::StencilAction::Keep:
+                        return GL_ZERO; // a
+                        return GL_KEEP; // b
+
+                    // Always 0x01, requires 0x01 in masked_ref to work
+                    case Pica::Regs::StencilAction::Increment:
+                    case Pica::Regs::StencilAction::IncrementWrap:
+                        if (masked_ref != 0x01) {
+                            needs_stencil_read = true;
+                        }
+                        return GL_REPLACE;
+
+                    // Always 0xFF, requires 0xFF in masked_ref to work
+                    case Pica::Regs::StencilAction::Invert:
+                    case Pica::Regs::StencilAction::DecrementWrap:
+                        if (masked_ref != 0xFF) {
+                            needs_stencil_read = true;
+                        }
+                        return GL_REPLACE;
+
+                    // Always masked ref
+                    case Pica::Regs::StencilAction::Replace:
+                        return GL_REPLACE;
+
+                    // Always 0x00
+                    case Pica::Regs::StencilAction::Zero:
+                    case Pica::Regs::StencilAction::Decrement:
+                        return GL_ZERO;
+
+                    default:
+                        LOG_CRITICAL(Render_OpenGL, "Unknown stencil action %x", (int)action);
+                        UNIMPLEMENTED();
+                        return GL_KEEP;
+                    }
+
+                };
+
+                // If the stencil test can fail we have to check the stencil op
+                if (state.depth.test_func != GL_ALWAYS) {
+                    state.stencil.action_stencil_fail =
+                        StencilAllowedOp(stencil_test.action_stencil_fail);
+                }
+
+                // If the depth test can pass we have to check the stencil op
+                if (state.depth.test_func != GL_NEVER) {
+                    state.stencil.action_depth_fail =
+                        StencilAllowedOp(stencil_test.action_depth_pass);
+                }
+
+                // If the depth test can fail we have to check the stencil op
+                if (state.depth.test_func != GL_ALWAYS) {
+                    state.stencil.action_depth_pass =
+                        StencilAllowedOp(stencil_test.action_depth_fail);
+                }
+
+                // Now check if we support this mode
+                if (needs_stencil_read) {
+                    LOG_CRITICAL(Render_OpenGL, "Can't emulate disabled read from stencil yet");
+                    UNIMPLEMENTED();
+                }
+
+            }
+
+        } else {
+            state.stencil.test_func = PicaToGL::CompareFunc(stencil_test.func);
+            state.stencil.test_ref = stencil_test.reference_value;
+            state.stencil.test_mask = stencil_test.input_mask;
+            state.stencil.action_stencil_fail =
+                PicaToGL::StencilOp(stencil_test.action_stencil_fail);
+            state.stencil.action_depth_fail = PicaToGL::StencilOp(stencil_test.action_depth_fail);
+            state.stencil.action_depth_pass = PicaToGL::StencilOp(stencil_test.action_depth_pass);
+        }
+    }
 }
 
+// Always call SyncStencilTest after this returns!
 void RasterizerOpenGL::SyncDepthTest() {
     const auto& regs = Pica::g_state.regs;
-    state.depth.test_enabled =
-        regs.output_merger.depth_test_enable == 1 || regs.output_merger.depth_write_enable == 1;
-    state.depth.test_func = regs.output_merger.depth_test_enable == 1
-                                ? PicaToGL::CompareFunc(regs.output_merger.depth_test_func)
-                                : GL_ALWAYS;
+
+    // Enable depth test so depth writes can still occur
+    state.depth.test_enabled = GL_TRUE;
+
+    if (!regs.output_merger.depth_test_enable) {
+        state.depth.test_func = GL_ALWAYS;
+    } else {
+
+        if (!regs.framebuffer.allow_depth_stencil_read) {
+
+            // If reads are not allowed we have to patch the depth test accordingly
+            state.depth.test_func = PicaToGL::CompareXToZeroFunc(regs.output_merger.depth_test_func);
+
+            // Check if the result is known at this point, if not it depends on the framebuffer really being zero
+            if (state.depth.test_func != GL_NEVER && state.depth.test_func != GL_ALWAYS) {
+                LOG_CRITICAL(Render_OpenGL, "Can't emulate disabled read on depth yet");
+                UNIMPLEMENTED();
+            }
+
+        } else {
+            state.depth.test_func = PicaToGL::CompareFunc(regs.output_merger.depth_test_func);
+        }
+
+    }
 }
 
 void RasterizerOpenGL::SyncCombinerColor() {

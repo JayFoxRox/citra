@@ -648,13 +648,19 @@ struct Regs {
     }
 
     struct FramebufferConfig {
-        INSERT_PADDING_WORDS(0x3);
+        INSERT_PADDING_WORDS(0x2);
+
+        union {
+            BitField<0, 4, u32> allow_color_read; // 0 = disable, else enable
+        };
 
         union {
             BitField<0, 4, u32> allow_color_write; // 0 = disable, else enable
         };
 
-        INSERT_PADDING_WORDS(0x1);
+        union {
+            BitField<0, 2, u32> allow_depth_stencil_read; // 0 = disable, else enable
+        };
 
         union {
             BitField<0, 2, u32> allow_depth_stencil_write; // 0 = disable, else enable
