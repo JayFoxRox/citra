@@ -21,6 +21,7 @@
 #include "citra_qt/debugger/graphics/graphics.h"
 #include "citra_qt/debugger/graphics/graphics_breakpoints.h"
 #include "citra_qt/debugger/graphics/graphics_cmdlists.h"
+#include "citra_qt/debugger/graphics/graphics_combiner.h"
 #include "citra_qt/debugger/graphics/graphics_surface.h"
 #include "citra_qt/debugger/graphics/graphics_tracing.h"
 #include "citra_qt/debugger/graphics/graphics_vertex_shader.h"
@@ -127,6 +128,10 @@ void GMainWindow::InitializeWidgets() {
     addDockWidget(Qt::RightDockWidgetArea, graphicsBreakpointsWidget);
     graphicsBreakpointsWidget->hide();
 
+    graphicsCombinerWidget = new GraphicsCombinerWidget(Pica::g_debug_context, this);
+    addDockWidget(Qt::RightDockWidgetArea, graphicsCombinerWidget);
+    graphicsCombinerWidget->hide();
+
     graphicsVertexShaderWidget = new GraphicsVertexShaderWidget(Pica::g_debug_context, this);
     addDockWidget(Qt::RightDockWidgetArea, graphicsVertexShaderWidget);
     graphicsVertexShaderWidget->hide();
@@ -156,6 +161,7 @@ void GMainWindow::InitializeDebugMenuActions() {
     debug_menu->addAction(registersWidget->toggleViewAction());
     debug_menu->addAction(callstackWidget->toggleViewAction());
     debug_menu->addAction(graphicsWidget->toggleViewAction());
+    debug_menu->addAction(graphicsCombinerWidget->toggleViewAction());
     debug_menu->addAction(graphicsCommandsWidget->toggleViewAction());
     debug_menu->addAction(graphicsBreakpointsWidget->toggleViewAction());
     debug_menu->addAction(graphicsVertexShaderWidget->toggleViewAction());
