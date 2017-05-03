@@ -39,6 +39,8 @@ PicaShaderConfig PicaShaderConfig::BuildFromRegs(const Pica::Regs& regs) {
                                 : Pica::FramebufferRegs::CompareFunc::Always;
 
     state.texture0_type = regs.texturing.texture0.type;
+    state.texture2_coord = regs.texturing.texture2_coord;
+    state.texture3_coord = regs.texturing.texture3_coord;
 
     // Copy relevant tev stages fields.
     // We don't sync const_color here because of the high variance, it is a
@@ -126,6 +128,42 @@ static bool IsPassThroughTevStage(const TevStageConfig& stage) {
             stage.GetColorMultiplier() == 1 && stage.GetAlphaMultiplier() == 1);
 }
 
+static void AppendTexCoord(std::string& out, const PicaShaderConfig& config, unsigned int index) {
+    const auto& state = config.state;
+    switch (index) {
+    case 0:
+        out += "texcoord[0]";
+        break;
+    case 1:
+        out += "texcoord[1]";
+        break;
+    case 2: {
+        unsigned texture_coords2[] = {2, 1};
+        if (state.texture2_coord >= ARRAY_SIZE(texture_coords2)) {
+            LOG_CRITICAL(Render_OpenGL, "Unknown texcoord 2 mapping %u", state.texture2_coord);
+            out += "vec2(0.0)";
+            break;
+        }
+        out += "texcoord[" + std::to_string(texture_coords2[state.texture2_coord]) + "]";
+        break;
+    }
+    case 3: {
+        unsigned texture_coords3[] = {0, 1, 2};
+        if (state.texture3_coord >= ARRAY_SIZE(texture_coords3)) {
+            LOG_CRITICAL(Render_OpenGL, "Unknown texcoord 3 mapping %u", state.texture3_coord);
+            out += "vec2(0.0)";
+            break;
+        }
+        out += "texcoord[" + std::to_string(texture_coords3[state.texture3_coord]) + "]";
+        break;
+    }
+    default:
+        out += "vec2(0.0)";
+        LOG_CRITICAL(Render_OpenGL, "Unknown texcoord %u", index);
+        break;
+    }
+}
+
 /// Writes the specified TEV stage source component(s)
 static void AppendSource(std::string& out, const PicaShaderConfig& config,
                          TevStageConfig::Source source, const std::string& index_name) {
@@ -162,7 +200,9 @@ static void AppendSource(std::string& out, const PicaShaderConfig& config,
         out += "texture(tex[1], texcoord[1])";
         break;
     case Source::Texture2:
-        out += "texture(tex[2], texcoord[2])";
+        out += "texture(tex[2], ";
+        AppendTexCoord(out, config, 2);
+        out += ")";
         break;
     case Source::PreviousBuffer:
         out += "combiner_buffer";
@@ -472,9 +512,10 @@ static void WriteLighting(std::string& out, const PicaShaderConfig& config) {
     if (lighting.bump_mode == LightingRegs::LightingBumpMode::NormalMap) {
         // Bump mapping is enabled using a normal map, read perturbation vector from the selected
         // texture
-        std::string bump_selector = std::to_string(lighting.bump_selector);
-        out += "vec3 surface_normal = 2.0 * texture(tex[" + bump_selector + "], texcoord[" +
-               bump_selector + "]).rgb - 1.0;\n";
+        unsigned bump_selector = lighting.bump_selector;
+        out += "vec3 surface_normal = 2.0 * texture(tex[" + std::to_string(bump_selector) + "], ";
+        AppendTexCoord(out, config, bump_selector);
+        out += ").rgb - 1.0;\n";
 
         // Recompute Z-component of perturbation if 'renorm' is enabled, this provides a higher
         // precision result
