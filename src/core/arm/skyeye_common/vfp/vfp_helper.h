@@ -292,7 +292,7 @@ inline s32 vfp_single_pack(const vfp_single* s) {
 }
 
 u32 vfp_single_normaliseround(ARMul_State* state, int sd, vfp_single* vs, u32 fpscr,
-                              const char* func);
+                              u32 exceptions, const char* func);
 
 // Double-precision
 struct vfp_double {
@@ -430,4 +430,4 @@ inline u32 fls(u32 x) {
 u32 vfp_double_multiply(vfp_double* vdd, vfp_double* vdn, vfp_double* vdm, u32 fpscr);
 u32 vfp_double_add(vfp_double* vdd, vfp_double* vdn, vfp_double* vdm, u32 fpscr);
 u32 vfp_double_normaliseround(ARMul_State* state, int dd, vfp_double* vd, u32 fpscr,
-                              const char* func);
+                              u32 exceptions, const char* func);
