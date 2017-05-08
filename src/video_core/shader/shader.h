@@ -144,8 +144,8 @@ struct ShaderSetup {
         return offsetof(ShaderSetup, uniforms.i) + index * sizeof(Math::Vec4<u8>);
     }
 
-    std::array<u32, 1024> program_code;
-    std::array<u32, 1024> swizzle_data;
+    std::array<u32, 4096> program_code;
+    std::array<u32, 4096> swizzle_data;
 
     /// Data private to ShaderEngines
     struct EngineData {

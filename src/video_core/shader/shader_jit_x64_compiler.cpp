@@ -834,8 +834,8 @@ void JitShader::FindReturnOffsets() {
     std::sort(return_offsets.begin(), return_offsets.end());
 }
 
-void JitShader::Compile(const std::array<u32, 1024>* program_code_,
-                        const std::array<u32, 1024>* swizzle_data_) {
+void JitShader::Compile(const std::array<u32, 4096>* program_code_,
+                        const std::array<u32, 4096>* swizzle_data_) {
     program_code = program_code_;
     swizzle_data = swizzle_data_;
 
