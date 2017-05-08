@@ -78,9 +78,10 @@ static void RunInterpreter(const ShaderSetup& setup, UnitState& state, DebugData
         }
     };
 
-    const auto& uniforms = setup.uniforms;
-    const auto& swizzle_data = setup.swizzle_data;
-    const auto& program_code = setup.program_code;
+    auto& data_setup = SharedGS() ? g_state.vs : setup;
+    const auto& uniforms = data_setup.uniforms;
+    const auto& swizzle_data = data_setup.swizzle_data;
+    const auto& program_code = data_setup.program_code;
 
     // Placeholder for invalid inputs
     static float24 dummy_vec4_float24[4];

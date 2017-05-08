@@ -4,6 +4,7 @@
 
 #include "common/hash.h"
 #include "common/microprofile.h"
+#include "video_core/pica_state.h"
 #include "video_core/shader/shader.h"
 #include "video_core/shader/shader_jit_x64.h"
 #include "video_core/shader/shader_jit_x64_compiler.h"
@@ -27,7 +28,8 @@ void JitX64Engine::SetupBatch(ShaderSetup& setup, unsigned int entry_point) {
         setup.engine_data.cached_shader = iter->second.get();
     } else {
         auto shader = std::make_unique<JitShader>();
-        shader->Compile(&setup.program_code, &setup.swizzle_data);
+        auto& data_setup = SharedGS() ? g_state.vs : setup;
+        shader->Compile(&data_setup.program_code, &data_setup.swizzle_data);
         setup.engine_data.cached_shader = shader.get();
         cache.emplace_hint(iter, cache_key, std::move(shader));
     }
@@ -41,7 +43,8 @@ void JitX64Engine::Run(const ShaderSetup& setup, UnitState& state) const {
     MICROPROFILE_SCOPE(GPU_Shader);
 
     const JitShader* shader = static_cast<const JitShader*>(setup.engine_data.cached_shader);
-    shader->Run(setup, state, setup.engine_data.entry_point);
+    auto& data_setup = SharedGS() ? g_state.vs : setup;
+    shader->Run(data_setup, state, setup.engine_data.entry_point);
 }
 
 } // namespace Shader
