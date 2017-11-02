@@ -16,8 +16,11 @@ constexpr u32 network_version = 1; ///< The version of this Room and RoomMember
 
 constexpr u16 DefaultRoomPort = 24872;
 
+constexpr u32 MaxMessageSize = 2000;
+
 /// Maximum number of concurrent connections allowed to this room.
 static constexpr u32 MaxConcurrentConnections = 254;
+
 constexpr size_t NumChannels = 1; // Number of channels used for the connection
 
 struct RoomInformation {
