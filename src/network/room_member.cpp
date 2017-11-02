@@ -361,8 +361,6 @@ RoomMember::CallbackHandle<T> RoomMember::RoomMemberImpl::Bind(
 
 // RoomMember
 RoomMember::RoomMember() : room_member_impl{std::make_unique<RoomMemberImpl>()} {
-    room_member_impl->client = enet_host_create(nullptr, 1, NumChannels, 0, 0);
-    ASSERT_MSG(room_member_impl->client != nullptr, "Could not create client");
 }
 
 RoomMember::~RoomMember() {
@@ -370,7 +368,6 @@ RoomMember::~RoomMember() {
     if (room_member_impl->loop_thread) {
         Leave();
     }
-    enet_host_destroy(room_member_impl->client);
 }
 
 RoomMember::State RoomMember::GetState() const {
@@ -403,11 +400,19 @@ void RoomMember::Join(const std::string& nick, const char* server_addr, u16 serv
             room_member_impl->SetState(State::Error);
             room_member_impl->loop_thread->join();
             room_member_impl->loop_thread.reset();
+
+            enet_host_destroy(room_member_impl->client);
+            room_member_impl->client = nullptr;
         }
     }
     // If the thread isn't running but the ptr still exists, reset it
     else if (room_member_impl->loop_thread) {
         room_member_impl->loop_thread.reset();
+    }
+
+    if (!room_member_impl->client) {
+        room_member_impl->client = enet_host_create(nullptr, 1, NumChannels, 0, 0);
+        ASSERT_MSG(room_member_impl->client != nullptr, "Could not create client");
     }
 
     ENetAddress address{};
@@ -500,6 +505,9 @@ void RoomMember::Leave() {
     room_member_impl->SetState(State::Idle);
     room_member_impl->loop_thread->join();
     room_member_impl->loop_thread.reset();
+
+    enet_host_destroy(room_member_impl->client);
+    room_member_impl->client = nullptr;
 }
 
 template void RoomMember::Unbind(CallbackHandle<WifiPacket>);
