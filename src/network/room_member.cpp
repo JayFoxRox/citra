@@ -360,8 +360,7 @@ RoomMember::CallbackHandle<T> RoomMember::RoomMemberImpl::Bind(
 }
 
 // RoomMember
-RoomMember::RoomMember() : room_member_impl{std::make_unique<RoomMemberImpl>()} {
-}
+RoomMember::RoomMember() : room_member_impl{std::make_unique<RoomMemberImpl>()} {}
 
 RoomMember::~RoomMember() {
     ASSERT_MSG(!IsConnected(), "RoomMember is being destroyed while connected");
