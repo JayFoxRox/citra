@@ -132,13 +132,39 @@ void AppLoader_NCCH::ParseRegionLockoutInfo() {
         SMDH smdh;
         memcpy(&smdh, smdh_buffer.data(), sizeof(SMDH));
         u32 region_lockout = smdh.region_lockout;
+
+        using SystemLanguage = Service::CFG::SystemLanguage;
+        const SystemLanguage current_language = Service::CFG::GetSystemLanguage();
+
         constexpr u32 REGION_COUNT = 7;
-        for (u32 region = 0; region < REGION_COUNT; ++region) {
-            if (region_lockout & 1) {
+
+        auto TryRegion = [&](bool only_current_language) -> bool {
+            for (u32 region = 0; region < REGION_COUNT; ++region) {
+
+                // Only test allowed regions
+                if (!(region_lockout & (1 << region))) {
+                    continue;
+                }
+
+                // Optionally only allow the current system language
+                if (only_current_language) {
+                    const SystemLanguage adjusted_language =
+                        Service::CFG::AdjustLanguageInfoBlock(region, current_language);
+                    if (current_language != adjusted_language) {
+                        continue;
+                    }
+                }
+
                 Service::CFG::SetPreferredRegionCode(region);
-                break;
+                return true;
             }
-            region_lockout >>= 1;
+            return false;
+        };
+
+        // Try to find a region for the selected language first,
+        // then fall back to other regions if nothing worked
+        if (!TryRegion(true)) {
+            TryRegion(false);
         }
     }
 }

@@ -581,8 +581,7 @@ void Init() {
 
 void Shutdown() {}
 
-/// Checks if the language is available in the chosen region, and returns a proper one
-static SystemLanguage AdjustLanguageInfoBlock(u32 region, SystemLanguage language) {
+SystemLanguage AdjustLanguageInfoBlock(u32 region, SystemLanguage language) {
     static const std::array<std::vector<SystemLanguage>, 7> region_languages{{
         // JPN
         {LANGUAGE_JP},

@@ -285,6 +285,14 @@ void Init();
 void Shutdown();
 
 /**
+ * Checks if the language is available in the chosen region, and returns a proper one.
+ * @param region the region to be used for the language.
+ * @param language the language to check for.
+ * @returns the adjusted language which is supported in the given region
+ */
+SystemLanguage AdjustLanguageInfoBlock(u32 region, SystemLanguage language);
+
+/**
  * Set the region code preferred by the game so that CFG will adjust to it when the region setting
  * is auto.
  * @param region_code the preferred region code to set
