@@ -4,17 +4,16 @@
 
 #include <algorithm>
 #include <atomic>
+#include <iomanip>
 #include <mutex>
 #include <random>
+#include <sstream>
 #include <thread>
 #include "enet/enet.h"
 #include "network/packet.h"
 #include "network/room.h"
 
 namespace Network {
-
-/// Maximum number of concurrent connections allowed to this room.
-static constexpr u32 MaxConcurrentConnections = 10;
 
 class Room::RoomImpl {
 public:
@@ -27,6 +26,8 @@ public:
     std::atomic<State> state{State::Closed}; ///< Current state of the room.
     RoomInformation room_information;        ///< Information about this room.
 
+    std::string password; ///< The password required to connect to this room.
+
     struct Member {
         std::string nickname;   ///< The nickname of the member.
         GameInfo game_info;     ///< The current game of the member
@@ -38,8 +39,12 @@ public:
     mutable std::mutex member_mutex; ///< Mutex for locking the members list
     /// This should be a std::shared_mutex as soon as C++17 is supported
 
+    std::string guid; /// The GUID of the room
+
     RoomImpl()
-        : random_gen(std::random_device()()), NintendoOUI{0x00, 0x1F, 0x32, 0x00, 0x00, 0x00} {}
+        : random_gen(std::random_device()()), NintendoOUI{0x00, 0x1F, 0x32, 0x00, 0x00, 0x00} {
+        CreateGUID();
+    }
 
     /// Thread that receives and dispatches network packets
     std::unique_ptr<std::thread> room_thread;
@@ -82,6 +87,11 @@ public:
     void SendVersionMismatch(ENetPeer* client);
 
     /**
+     * Sends a ID_ROOM_WRONG_PASSWORD message telling the client that the password is wrong.
+     */
+    void SendWrongPassword(ENetPeer* client);
+
+    /**
      * Notifies the member that its connection attempt was successful,
      * and it is now part of the room.
      */
@@ -99,6 +109,8 @@ public:
      * <MessageID>ID_ROOM_INFORMATION
      * <String> room_name
      * <u32> member_slots: The max number of clients allowed in this room
+     * <String> guid
+     * <u16> port
      * <u32> num_members: the number of currently joined clients
      * This is followed by the following three values for each member:
      * <String> nickname of that member
@@ -136,13 +148,18 @@ public:
      * to all other clients.
      */
     void HandleClientDisconnection(ENetPeer* client);
+
+    /**
+     * Creates a random ID in the form 12345678-1234-1234-1234-123456789012
+     */
+    void CreateGUID();
 };
 
 // RoomImpl
 void Room::RoomImpl::ServerLoop() {
     while (state != State::Closed) {
         ENetEvent event;
-        if (enet_host_service(server, &event, 100) > 0) {
+        if (enet_host_service(server, &event, 50) > 0) {
             switch (event.type) {
             case ENET_EVENT_TYPE_RECEIVE:
                 switch (event.packet->data[0]) {
@@ -187,6 +204,14 @@ void Room::RoomImpl::HandleJoinRequest(const ENetEvent* event) {
 
     u32 client_version;
     packet >> client_version;
+
+    std::string pass;
+    packet >> pass;
+
+    if (!(pass == password)) {
+        SendWrongPassword(event->peer);
+        return;
+    }
 
     if (!IsValidNickname(nickname)) {
         SendNameCollision(event->peer);
@@ -260,6 +285,16 @@ void Room::RoomImpl::SendMacCollision(ENetPeer* client) {
     enet_host_flush(server);
 }
 
+void Room::RoomImpl::SendWrongPassword(ENetPeer* client) {
+    Packet packet;
+    packet << static_cast<u8>(IdWrongPassword);
+
+    ENetPacket* enet_packet =
+        enet_packet_create(packet.GetData(), packet.GetDataSize(), ENET_PACKET_FLAG_RELIABLE);
+    enet_peer_send(client, 0, enet_packet);
+    enet_host_flush(server);
+}
+
 void Room::RoomImpl::SendVersionMismatch(ENetPeer* client) {
     Packet packet;
     packet << static_cast<u8>(IdVersionMismatch);
@@ -301,6 +336,9 @@ void Room::RoomImpl::BroadcastRoomInformation() {
     packet << static_cast<u8>(IdRoomInformation);
     packet << room_information.name;
     packet << room_information.member_slots;
+    packet << room_information.guid;
+    packet << room_information.port;
+    packet << room_information.preferred_game;
 
     packet << static_cast<u32>(members.size());
     {
@@ -382,6 +420,9 @@ void Room::RoomImpl::HandleChatPacket(const ENetEvent* event) {
         return; // Received a chat message from a unknown sender
     }
 
+    // Limit the size of chat messages to MaxMessageSize
+    message.resize(MaxMessageSize);
+
     Packet out_packet;
     out_packet << static_cast<u8>(IdChatMessage);
     out_packet << sending_member->nickname;
@@ -433,12 +474,28 @@ void Room::RoomImpl::HandleClientDisconnection(ENetPeer* client) {
     BroadcastRoomInformation();
 }
 
+void Room::RoomImpl::CreateGUID() {
+    std::uniform_int_distribution<> dis(0, 9999);
+    std::ostringstream stream;
+    stream << std::setfill('0') << std::setw(4) << dis(random_gen);
+    stream << std::setfill('0') << std::setw(4) << dis(random_gen) << "-";
+    stream << std::setfill('0') << std::setw(4) << dis(random_gen) << "-";
+    stream << std::setfill('0') << std::setw(4) << dis(random_gen) << "-";
+    stream << std::setfill('0') << std::setw(4) << dis(random_gen) << "-";
+    stream << std::setfill('0') << std::setw(4) << dis(random_gen);
+    stream << std::setfill('0') << std::setw(4) << dis(random_gen);
+    stream << std::setfill('0') << std::setw(4) << dis(random_gen);
+    guid = stream.str();
+}
+
 // Room
 Room::Room() : room_impl{std::make_unique<RoomImpl>()} {}
 
 Room::~Room() = default;
 
-void Room::Create(const std::string& name, const std::string& server_address, u16 server_port) {
+bool Room::Create(const std::string& name, const std::string& server_address, u16 server_port,
+                  const std::string& password, const u32 max_connections,
+                  const std::string& preferred_game, u64 preferred_game_id) {
     ENetAddress address;
     address.host = ENET_HOST_ANY;
     if (!server_address.empty()) {
@@ -446,13 +503,22 @@ void Room::Create(const std::string& name, const std::string& server_address, u1
     }
     address.port = server_port;
 
-    room_impl->server = enet_host_create(&address, MaxConcurrentConnections, NumChannels, 0, 0);
-    // TODO(B3N30): Allow specifying the maximum number of concurrent connections.
+    room_impl->server = enet_host_create(&address, max_connections, NumChannels, 0, 0);
+    if (!room_impl->server) {
+        return false;
+    }
     room_impl->state = State::Open;
 
     room_impl->room_information.name = name;
-    room_impl->room_information.member_slots = MaxConcurrentConnections;
+    room_impl->room_information.member_slots = max_connections;
+    room_impl->room_information.guid = room_impl->guid;
+    room_impl->room_information.port = server_port;
+    room_impl->room_information.preferred_game = preferred_game;
+    room_impl->room_information.preferred_game_id = preferred_game_id;
+    room_impl->password = password;
+
     room_impl->StartLoop();
+    return true;
 }
 
 Room::State Room::GetState() const {
@@ -474,7 +540,11 @@ std::vector<Room::Member> Room::GetRoomMemberList() const {
         member_list.push_back(member);
     }
     return member_list;
-};
+}
+
+bool Room::HasPassword() const {
+    return !room_impl->password.empty();
+}
 
 void Room::Destroy() {
     room_impl->state = State::Closed;
