@@ -28,9 +28,11 @@
 
 #include "common/common_types.h"
 #include "common/scm_rev.h"
+#ifdef ENABLE_ANNOUNCE
 #include "core/announce_multiplayer_session.h"
 #include "core/core.h"
 #include "core/settings.h"
+#endif
 #include "network/network.h"
 
 static void PrintHelp(const char* argv0) {
@@ -42,9 +44,11 @@ static void PrintHelp(const char* argv0) {
                  "--password          The password for the room\n"
                  "--preferred-game    The prefered game for this room\n"
                  "--preferred-game-id The prefered game-id for this room\n"
+#ifdef ENABLE_ANNOUNCE
                  "--username          The username used for announce\n"
                  "--token             The token used for announce\n"
                  "--announce-url      The url to the announce server"
+#endif
                  "-h, --help          Display this help and exit\n"
                  "-v, --version       Output version information and exit\n";
 }
@@ -74,9 +78,11 @@ int main(int argc, char** argv) {
     std::string room_name;
     std::string password;
     std::string preferred_game;
+#ifdef ENABLE_ANNOUNCE
     std::string username;
     std::string token;
     std::string announce_url;
+#endif
     u64 preferred_game_id = 0;
     u16 port = Network::DefaultRoomPort;
     u32 max_members = 16;
@@ -88,9 +94,11 @@ int main(int argc, char** argv) {
         {"password", required_argument, 0, 'w'},
         {"preferred-game", required_argument, 0, 'g'},
         {"preferred-game-id", required_argument, 0, 'i'},
+#ifdef ENABLE_ANNOUNCE
         {"username", required_argument, 0, 'u'},
         {"token", required_argument, 0, 't'},
         {"announce-url", required_argument, 0, 'a'},
+#endif
         {"help", no_argument, 0, 'h'},
         {"version", no_argument, 0, 'v'},
         {0, 0, 0, 0},
@@ -118,6 +126,7 @@ int main(int argc, char** argv) {
             case 'i':
                 preferred_game_id = strtoull(optarg, &endarg, 16);
                 break;
+#ifdef ENABLE_ANNOUNCE
             case 'u':
                 username.assign(optarg);
                 break;
@@ -127,6 +136,7 @@ int main(int argc, char** argv) {
             case 'a':
                 announce_url.assign(optarg);
                 break;
+#endif
             case 'h':
                 PrintHelp(argv[0]);
                 return 0;
@@ -166,6 +176,7 @@ int main(int argc, char** argv) {
         PrintHelp(argv[0]);
         return -1;
     }
+#ifdef ENABLE_ANNOUNCE
     bool announce = true;
     if (username.empty()) {
         announce = false;
@@ -185,6 +196,7 @@ int main(int argc, char** argv) {
         Settings::values.citra_username = username;
         Settings::values.citra_token = token;
     }
+#endif
 
     Network::Init();
     if (std::shared_ptr<Network::Room> room = Network::GetRoom().lock()) {
@@ -194,28 +206,34 @@ int main(int argc, char** argv) {
             return -1;
         }
         std::cout << "Room is open. Close with Q+Enter...\n\n";
+#ifdef ENABLE_ANNOUNCE
         auto announce_session = std::make_unique<Core::AnnounceMultiplayerSession>();
         if (announce) {
             announce_session->Start();
         }
+#endif
         while (room->GetState() == Network::Room::State::Open) {
             std::string in;
             std::cin >> in;
             if (in.size() > 0) {
+#ifdef ENABLE_ANNOUNCE
                 if (announce) {
                     announce_session->Stop();
                 }
                 announce_session.reset();
+#endif
                 room->Destroy();
                 Network::Shutdown();
                 return 0;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
+#ifdef ENABLE_ANNOUNCE
         if (announce) {
             announce_session->Stop();
         }
         announce_session.reset();
+#endif
         room->Destroy();
     }
     Network::Shutdown();
