@@ -16,7 +16,7 @@ constexpr u32 network_version = 1; ///< The version of this Room and RoomMember
 
 constexpr u16 DefaultRoomPort = 24872;
 
-constexpr u32 MaxMessageSize = 2000;
+constexpr u32 MaxMessageSize = 500;
 
 /// Maximum number of concurrent connections allowed to this room.
 static constexpr u32 MaxConcurrentConnections = 254;
